@@ -1,0 +1,98 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600&display=swap');
+
+@layer base {
+  :root {
+    --background: 220 20% 4%;
+    --foreground: 200 20% 90%;
+
+    --card: 220 18% 7%;
+    --card-foreground: 200 20% 90%;
+
+    --popover: 220 18% 7%;
+    --popover-foreground: 200 20% 90%;
+
+    --primary: 175 80% 50%;
+    --primary-foreground: 220 20% 4%;
+
+    --secondary: 220 15% 12%;
+    --secondary-foreground: 200 20% 80%;
+
+    --muted: 220 15% 10%;
+    --muted-foreground: 220 10% 50%;
+
+    --accent: 160 70% 45%;
+    --accent-foreground: 220 20% 4%;
+
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 220 15% 14%;
+    --input: 220 15% 14%;
+    --ring: 175 80% 50%;
+
+    --radius: 0.75rem;
+
+    --chart-up: 145 70% 50%;
+    --chart-down: 0 72% 55%;
+    --glow-primary: 175 80% 50%;
+    --surface-glass: 220 18% 8%;
+
+    --sidebar-background: 220 18% 6%;
+    --sidebar-foreground: 200 20% 80%;
+    --sidebar-primary: 175 80% 50%;
+    --sidebar-primary-foreground: 220 20% 4%;
+    --sidebar-accent: 220 15% 12%;
+    --sidebar-accent-foreground: 200 20% 80%;
+    --sidebar-border: 220 15% 14%;
+    --sidebar-ring: 175 80% 50%;
+
+    --font-display: 'Space Grotesk', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-display);
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+  }
+
+  code, .font-mono {
+    font-family: var(--font-mono);
+  }
+}
+
+@layer utilities {
+  .text-glow {
+    text-shadow: 0 0 20px hsl(var(--glow-primary) / 0.5), 0 0 40px hsl(var(--glow-primary) / 0.2);
+  }
+
+  .box-glow {
+    box-shadow: 0 0 20px hsl(var(--glow-primary) / 0.15), 0 0 40px hsl(var(--glow-primary) / 0.05);
+  }
+
+  .glass {
+    background: hsl(var(--surface-glass) / 0.6);
+    backdrop-filter: blur(12px);
+    border: 1px solid hsl(var(--border) / 0.5);
+  }
+
+  .gradient-mesh {
+    background: 
+      radial-gradient(ellipse at 20% 50%, hsl(var(--primary) / 0.08) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 20%, hsl(var(--accent) / 0.06) 0%, transparent 50%),
+      radial-gradient(ellipse at 50% 80%, hsl(175 80% 50% / 0.04) 0%, transparent 50%);
+  }
+}
