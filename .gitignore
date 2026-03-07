@@ -25,3 +25,8 @@ dist-ssr
 
 .env
 .env.*.local
+
+# Python
+backend/__pycache__/
+backend/lightning_logs/
+backend/*.pyc
