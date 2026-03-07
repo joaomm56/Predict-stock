@@ -1,6 +1,7 @@
 import warnings
 warnings.simplefilter(action="ignore", category=FutureWarning)
-
+import matplotlib
+matplotlib.use("Agg")
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
