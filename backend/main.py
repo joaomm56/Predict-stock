@@ -164,3 +164,4 @@ def forecast(req: ForecastRequest):
         tb = traceback.format_exc()
         print(tb)
         raise HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}")
+    #just to commit
