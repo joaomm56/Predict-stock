@@ -27,7 +27,7 @@ const plans = [
       { label: "Análise técnica completa", included: false },
       { label: "Exportação de dados", included: false },
     ],
-    cta: "Plano atual",
+    cta: "Começar grátis",
     ctaVariant: "outline",
   },
   {
