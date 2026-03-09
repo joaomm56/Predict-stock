@@ -117,7 +117,7 @@ def _recursive_forecast(model: GradientBoostingRegressor,
     """
     use_vol = len(volumes) == len(prices)
     buf     = list(prices[-_MIN_HIST:])
-    vbuf    = list(volumes[-20:]) if use_vol else []
+    vbuf    = list(volumes[-_MIN_HIST:]) if use_vol else []
 
     # Fit log-linear trend on last 90 days of actual prices for long-horizon anchor
     lookback = min(90, len(prices))
