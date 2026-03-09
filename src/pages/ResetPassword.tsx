@@ -4,9 +4,11 @@ import { Activity, Lock, ArrowRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { usePageTitle } from "@/hooks/usePageTitle";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 const ResetPassword = () => {
-  usePageTitle("Nova Senha");
+  usePageTitle("Reset Password");
+  const { t } = useLanguage();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [loading, setLoading] = useState(false);
@@ -16,7 +18,7 @@ const ResetPassword = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (password !== confirm) {
-      setError("As senhas não coincidem.");
+      setError(t.reset.pw_mismatch);
       return;
     }
     setError(null);
@@ -52,14 +54,14 @@ const ResetPassword = () => {
               Apex<span className="text-primary">Predict</span>
             </span>
           </div>
-          <h1 className="text-2xl font-bold text-foreground">Nova senha</h1>
-          <p className="text-sm text-muted-foreground mt-1">Define a tua nova senha de acesso</p>
+          <h1 className="text-2xl font-bold text-foreground">{t.reset.title}</h1>
+          <p className="text-sm text-muted-foreground mt-1">{t.reset.desc}</p>
         </div>
 
         <div className="glass rounded-2xl p-8 box-glow">
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label className="block text-sm font-medium text-foreground mb-2">Nova senha</label>
+              <label className="block text-sm font-medium text-foreground mb-2">{t.reset.lbl_password}</label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <input
@@ -75,7 +77,7 @@ const ResetPassword = () => {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-foreground mb-2">Confirmar senha</label>
+              <label className="block text-sm font-medium text-foreground mb-2">{t.reset.lbl_confirm}</label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <input
@@ -96,7 +98,7 @@ const ResetPassword = () => {
               disabled={loading}
               className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-6 py-3 font-semibold text-primary-foreground hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50"
             >
-              {loading ? "A guardar…" : "Guardar nova senha"}
+              {loading ? t.reset.btn_loading : t.reset.btn_save}
               <ArrowRight className="h-4 w-4" />
             </button>
           </form>

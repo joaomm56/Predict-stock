@@ -4,7 +4,9 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { LanguageProvider } from "@/contexts/LanguageContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
+import BackendBanner from "@/components/BackendBanner";
 import Index from "./pages/Index";
 import Forecast from "./pages/Forecast";
 import Mercado from "./pages/Mercado";
@@ -17,6 +19,9 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
+import Alertas from "./pages/Alertas";
+import Comparar from "./pages/Comparar";
+import Backtesting from "./pages/Backtesting";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -24,31 +29,37 @@ const queryClient = new QueryClient();
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <AuthProvider>
-          <Routes>
-            {/* Públicas */}
-            <Route path="/" element={<Index />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/pricing" element={<Pricing />} />
-            <Route path="/forgot-password" element={<ForgotPassword />} />
-            <Route path="/reset-password" element={<ResetPassword />} />
+      <LanguageProvider>
+        <BackendBanner />
+        <Toaster />
+        <Sonner />
+        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+          <AuthProvider>
+            <Routes>
+              {/* Public */}
+              <Route path="/" element={<Index />} />
+              <Route path="/login" element={<Login />} />
+              <Route path="/register" element={<Register />} />
+              <Route path="/pricing" element={<Pricing />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route path="/reset-password" element={<ResetPassword />} />
 
-            {/* Protegidas */}
-            <Route path="/mercado"  element={<ProtectedRoute><Mercado /></ProtectedRoute>} />
-            <Route path="/forecast" element={<ProtectedRoute><Forecast /></ProtectedRoute>} />
-            <Route path="/analise"  element={<ProtectedRoute><Analise /></ProtectedRoute>} />
-            <Route path="/portfolio" element={<ProtectedRoute><Portfolio /></ProtectedRoute>} />
-            <Route path="/profile"    element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-            <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+              {/* Protected */}
+              <Route path="/mercado"     element={<ProtectedRoute><Mercado /></ProtectedRoute>} />
+              <Route path="/forecast"    element={<ProtectedRoute><Forecast /></ProtectedRoute>} />
+              <Route path="/analise"     element={<ProtectedRoute><Analise /></ProtectedRoute>} />
+              <Route path="/portfolio"   element={<ProtectedRoute><Portfolio /></ProtectedRoute>} />
+              <Route path="/profile"     element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+              <Route path="/dashboard"   element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+              <Route path="/alertas"     element={<ProtectedRoute><Alertas /></ProtectedRoute>} />
+              <Route path="/comparar"    element={<ProtectedRoute><Comparar /></ProtectedRoute>} />
+              <Route path="/backtesting" element={<ProtectedRoute><Backtesting /></ProtectedRoute>} />
 
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </AuthProvider>
-      </BrowserRouter>
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+          </AuthProvider>
+        </BrowserRouter>
+      </LanguageProvider>
     </TooltipProvider>
   </QueryClientProvider>
 );

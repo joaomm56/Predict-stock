@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
-import { Activity, Search, TrendingUp, TrendingDown, Brain, Lock, ChevronDown } from "lucide-react";
+import { Activity, Search, TrendingUp, TrendingDown, Brain, Lock, ChevronDown, Download } from "lucide-react";
 import { useSearchParams, Link } from "react-router-dom";
 import Navbar from "@/components/Navbar";
 import StockChart from "@/components/StockChart";
@@ -9,6 +9,7 @@ import type { ChartPoint } from "@/components/StockChart";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import { usePlan, getForecastUsage, incrementForecastUsage } from "@/hooks/usePlan";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/lib/supabase";
 
 function buildChartData(result: ForecastResponse, chartHistoryDays: number): ChartPoint[] {
@@ -40,9 +41,10 @@ function buildChartData(result: ForecastResponse, chartHistoryDays: number): Cha
 const POPULAR = ["AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "GOOGL"];
 
 const Forecast = () => {
-  usePageTitle("Previsões");
+  usePageTitle("Forecasts");
   const { plan, limits } = usePlan();
   const { user } = useAuth();
+  const { t } = useLanguage();
   const [searchParams] = useSearchParams();
   const [ticker, setTicker] = useState(searchParams.get("ticker") ?? "");
 
@@ -71,8 +73,8 @@ const Forecast = () => {
     : Math.max(0, limits.forecastsPerDay - forecastsUsed);
 
   useEffect(() => {
-    const t = searchParams.get("ticker");
-    if (t) setTicker(t);
+    const tp = searchParams.get("ticker");
+    if (tp) setTicker(tp);
   }, [searchParams]);
 
   useEffect(() => {
@@ -90,7 +92,7 @@ const Forecast = () => {
     if (!ticker.trim()) return;
 
     if (forecastsLeft === 0) {
-      setError(`Atingiste o limite de ${limits.forecastsPerDay} previsões por dia no plano Free. Faz upgrade para continuar.`);
+      setError(t.forecast.plan_limit_err.replace("{max}", String(limits.forecastsPerDay)));
       return;
     }
 
@@ -117,10 +119,32 @@ const Forecast = () => {
         });
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro desconhecido");
+      setError(err instanceof Error ? err.message : t.common.error);
     } finally {
       setLoading(false);
     }
+  };
+
+  const exportCSV = () => {
+    if (!result) return;
+    const rows = [
+      ["Date", t.common.real_price, "Historic Forecast", t.common.ai_forecast],
+      ...result.real.dates.map((d, i) => [
+        d,
+        result.real.values[i],
+        result.historic_pred.values[i] ?? "",
+        "",
+      ]),
+      ...result.future_pred.dates.map((d, i) => [d, "", "", result.future_pred.values[i]]),
+    ];
+    const csv = rows.map((r) => r.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${result.ticker}_forecast.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const isUp = result ? result.forecast_end_price >= result.last_price : false;
@@ -141,13 +165,13 @@ const Forecast = () => {
         >
           <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 border border-primary/20 px-4 py-1.5 mb-6">
             <Activity className="h-3.5 w-3.5 text-primary" />
-            <span className="font-mono text-xs text-primary">Previsão com Prophet IA</span>
+            <span className="font-mono text-xs text-primary">{t.forecast.badge}</span>
           </div>
           <h1 className="text-4xl md:text-5xl font-bold text-foreground mb-4">
-            Prever <span className="text-primary">Ação</span>
+            {t.forecast.title} <span className="text-primary">{t.forecast.title_hl}</span>
           </h1>
           <p className="text-muted-foreground max-w-lg mx-auto">
-            Insere o ticker, o intervalo histórico e quantos dias queres prever.
+            {t.forecast.desc}
           </p>
         </motion.div>
 
@@ -161,10 +185,10 @@ const Forecast = () => {
         >
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4 items-end">
             <div>
-              <label className="block text-xs text-muted-foreground mb-1.5 font-mono">Ticker</label>
+              <label className="block text-xs text-muted-foreground mb-1.5 font-mono">{t.forecast.lbl_ticker}</label>
               <input
                 type="text"
-                placeholder="ex: AAPL"
+                placeholder={t.forecast.ph_ticker}
                 value={ticker}
                 onChange={(e) => setTicker(e.target.value.toUpperCase())}
                 className="w-full rounded-lg bg-secondary border border-border px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
@@ -172,7 +196,7 @@ const Forecast = () => {
             </div>
             <div>
               <label className="block text-xs text-muted-foreground mb-1.5 font-mono flex items-center gap-1">
-                Início {plan === "free" && <Lock className="h-2.5 w-2.5" />}
+                {t.forecast.lbl_start} {plan === "free" && <Lock className="h-2.5 w-2.5" />}
               </label>
               <input
                 type="date"
@@ -184,14 +208,14 @@ const Forecast = () => {
               />
             </div>
             <div>
-              <label className="block text-xs text-muted-foreground mb-1.5 font-mono">Fim</label>
+              <label className="block text-xs text-muted-foreground mb-1.5 font-mono">{t.forecast.lbl_end}</label>
               <div className="w-full rounded-lg bg-secondary/50 border border-border px-3 py-2 font-mono text-sm text-muted-foreground cursor-default">
                 {today}
               </div>
             </div>
             <div className="relative" ref={daysRef}>
               <label className="block text-xs text-muted-foreground mb-1.5 font-mono flex items-center gap-1">
-                Horizonte {plan !== "premium" && <Lock className="h-2.5 w-2.5" />}
+                {t.forecast.lbl_horizon} {plan !== "premium" && <Lock className="h-2.5 w-2.5" />}
               </label>
               <button
                 type="button"
@@ -199,16 +223,16 @@ const Forecast = () => {
                 className="w-full rounded-lg bg-secondary border border-border px-3 py-2 font-mono text-sm text-foreground flex items-center justify-between focus:outline-none focus:ring-1 focus:ring-primary"
               >
                 <span>{([
-                  [15, "15 dias"], [30, "1 mês"], [60, "2 meses"], [90, "3 meses"],
-                  [180, "6 meses"], [270, "9 meses"], [365, "1 ano"], [730, "2 anos"],
+                  [15, t.forecast.horizon_opts.d15], [30, t.forecast.horizon_opts.d30], [60, t.forecast.horizon_opts.d60], [90, t.forecast.horizon_opts.d90],
+                  [180, t.forecast.horizon_opts.d180], [270, t.forecast.horizon_opts.d270], [365, t.forecast.horizon_opts.d365], [730, t.forecast.horizon_opts.d730],
                 ] as [number, string][]).find(([d]) => d === days)?.[1] ?? `${days}d`}</span>
                 <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${daysOpen ? "rotate-180" : ""}`} />
               </button>
               {daysOpen && (
                 <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-background shadow-lg overflow-hidden">
                   {([
-                    [15, "15 dias"], [30, "1 mês"], [60, "2 meses"], [90, "3 meses"],
-                    [180, "6 meses"], [270, "9 meses"], [365, "1 ano"], [730, "2 anos"],
+                    [15, t.forecast.horizon_opts.d15], [30, t.forecast.horizon_opts.d30], [60, t.forecast.horizon_opts.d60], [90, t.forecast.horizon_opts.d90],
+                    [180, t.forecast.horizon_opts.d180], [270, t.forecast.horizon_opts.d270], [365, t.forecast.horizon_opts.d365], [730, t.forecast.horizon_opts.d730],
                   ] as [number, string][]).map(([d, label]) => {
                     const locked = d > limits.forecastDaysMax;
                     return (
@@ -240,13 +264,13 @@ const Forecast = () => {
               className="flex items-center gap-2 rounded-lg bg-primary px-6 py-2.5 font-semibold text-sm text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
             >
               <Search className="h-4 w-4" />
-              {loading ? "A processar…" : "Gerar Previsão"}
+              {loading ? t.forecast.btn_processing : t.forecast.btn_generate}
             </button>
             {plan === "free" && (
               <span className="font-mono text-xs text-muted-foreground">
                 {forecastsLeft === 0
-                  ? "Limite atingido hoje"
-                  : `${forecastsLeft} de ${limits.forecastsPerDay} previsões restantes hoje`}
+                  ? t.forecast.limit_today
+                  : t.forecast.forecasts_left.replace("{n}", String(forecastsLeft)).replace("{max}", String(limits.forecastsPerDay))}
               </span>
             )}
           </div>
@@ -254,8 +278,8 @@ const Forecast = () => {
           {plan === "free" && (
             <p className="mt-3 text-xs text-muted-foreground font-mono flex items-center gap-1.5">
               <Lock className="h-3 w-3" />
-              Plano Free: previsão até {limits.forecastDaysMax} dias.{" "}
-              <Link to="/pricing" className="text-primary underline underline-offset-2">Fazer upgrade</Link>
+              {t.forecast.free_limit.replace("{max}", String(limits.forecastDaysMax))}{" "}
+              <Link to="/pricing" className="text-primary underline underline-offset-2">{t.forecast.upgrade}</Link>
             </p>
           )}
 
@@ -266,7 +290,7 @@ const Forecast = () => {
                 type="submit"
                 className="text-xs font-semibold text-primary underline underline-offset-2 hover:opacity-80 transition-opacity"
               >
-                Tentar novamente
+                {t.forecast.btn_retry}
               </button>
             </div>
           )}
@@ -286,12 +310,12 @@ const Forecast = () => {
                 <Brain className="absolute inset-0 m-auto h-6 w-6 text-primary" />
               </div>
             </div>
-            <p className="font-semibold text-foreground mb-1">A treinar o modelo de IA…</p>
+            <p className="font-semibold text-foreground mb-1">{t.forecast.loading_title}</p>
             <p className="text-sm text-muted-foreground max-w-xs mx-auto">
-              O Prophet está a processar os dados históricos. Aguarda alguns segundos.
+              {t.forecast.loading_desc}
             </p>
             <div className="mt-6 flex justify-center gap-1.5">
-              {["Dados históricos", "Treino", "Previsão"].map((step, i) => (
+              {t.forecast.steps.map((step, i) => (
                 <div key={step} className="flex items-center gap-1.5">
                   <div className="flex items-center gap-1">
                     <div className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" style={{ animationDelay: `${i * 0.3}s` }} />
@@ -313,19 +337,19 @@ const Forecast = () => {
             className="max-w-3xl mx-auto glass rounded-2xl p-10 text-center"
           >
             <Activity className="h-10 w-10 text-primary/40 mx-auto mb-3" />
-            <p className="font-medium text-foreground mb-1">Pronto para prever</p>
+            <p className="font-medium text-foreground mb-1">{t.forecast.empty_title}</p>
             <p className="text-sm text-muted-foreground mb-6">
-              Preenche o formulário acima e clica em "Gerar Previsão".
+              {t.forecast.empty_desc}
             </p>
             <div className="flex flex-wrap justify-center gap-2">
-              <p className="w-full text-xs text-muted-foreground font-mono mb-1">Sugestões populares</p>
-              {POPULAR.map((t) => (
+              <p className="w-full text-xs text-muted-foreground font-mono mb-1">{t.forecast.popular}</p>
+              {POPULAR.map((sym) => (
                 <button
-                  key={t}
-                  onClick={() => setTicker(t)}
+                  key={sym}
+                  onClick={() => setTicker(sym)}
                   className="rounded-lg border border-border px-3 py-1.5 font-mono text-xs text-muted-foreground hover:border-primary hover:text-primary transition-colors"
                 >
-                  {t}
+                  {sym}
                 </button>
               ))}
             </div>
@@ -348,13 +372,13 @@ const Forecast = () => {
               </div>
               <div className="flex items-center gap-6">
                 <div className="text-right">
-                  <p className="text-xs text-muted-foreground font-mono mb-0.5">Preço atual</p>
+                  <p className="text-xs text-muted-foreground font-mono mb-0.5">{t.forecast.result_current}</p>
                   <span className="font-mono text-xl font-bold text-foreground">
                     {result.last_price.toFixed(2)} {result.meta.currency}
                   </span>
                 </div>
                 <div className="text-right">
-                  <p className="text-xs text-muted-foreground font-mono mb-0.5">Previsão ({days}d)</p>
+                  <p className="text-xs text-muted-foreground font-mono mb-0.5">{t.forecast.result_forecast.replace("{days}", String(days))}</p>
                   <div className={`flex items-center gap-1.5 font-mono text-xl font-bold ${isUp ? "text-chart-up" : "text-chart-down"}`}>
                     {isUp ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
                     {result.forecast_end_price.toFixed(2)} {result.meta.currency}
@@ -366,17 +390,31 @@ const Forecast = () => {
 
             {/* Chart */}
             <div className="glass rounded-2xl p-6">
-              <div className="flex items-center justify-between mb-4">
-                <span className="font-mono text-sm text-primary font-medium">Histórico + Previsão</span>
+              <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+                <span className="font-mono text-sm text-primary font-medium">{t.forecast.chart_title}</span>
                 <div className="flex items-center gap-4">
                   <div className="flex items-center gap-2">
                     <div className="h-2 w-2 rounded-full bg-primary" />
-                    <span className="text-xs text-muted-foreground">Preço Real</span>
+                    <span className="text-xs text-muted-foreground">{t.forecast.real_price}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="h-2 w-2 rounded-full bg-accent border border-dashed border-accent" />
-                    <span className="text-xs text-muted-foreground">Previsão IA</span>
+                    <span className="text-xs text-muted-foreground">{t.forecast.ai_forecast}</span>
                   </div>
+                  {plan === "premium" ? (
+                    <button
+                      onClick={exportCSV}
+                      className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-primary hover:border-primary transition-colors"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      CSV
+                    </button>
+                  ) : (
+                    <Link to="/pricing" className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-primary hover:border-primary transition-colors">
+                      <Lock className="h-3 w-3" />
+                      CSV
+                    </Link>
+                  )}
                 </div>
               </div>
               <StockChart chartData={chartData} />
@@ -386,9 +424,9 @@ const Forecast = () => {
             {limits.advancedMetrics ? (
               <div className="grid sm:grid-cols-3 gap-4">
                 {[
-                  { label: "R² Score", value: result.metrics.r2.toFixed(4), desc: "Qualidade do modelo" },
-                  { label: "MAE", value: result.metrics.mae.toFixed(4), desc: "Erro absoluto médio" },
-                  { label: "MAPE", value: `${result.metrics.mape.toFixed(2)}%`, desc: "Erro percentual médio" },
+                  { label: "R² Score", value: result.metrics.r2.toFixed(4), desc: t.backtesting.r2_desc },
+                  { label: "MAE", value: result.metrics.mae.toFixed(4), desc: t.backtesting.mae_desc },
+                  { label: "MAPE", value: `${result.metrics.mape.toFixed(2)}%`, desc: t.backtesting.mape_desc },
                 ].map((m) => (
                   <div key={m.label} className="glass rounded-xl p-5 text-center">
                     <p className="text-xs text-muted-foreground font-mono mb-1">{m.label}</p>
@@ -404,15 +442,15 @@ const Forecast = () => {
                     <Lock className="h-4 w-4 text-primary" />
                   </div>
                   <div>
-                    <p className="font-semibold text-foreground text-sm">Métricas avançadas bloqueadas</p>
-                    <p className="text-xs text-muted-foreground">R², MAE e MAPE disponíveis no plano Pro.</p>
+                    <p className="font-semibold text-foreground text-sm">{t.forecast.metrics_locked_title}</p>
+                    <p className="text-xs text-muted-foreground">{t.forecast.metrics_locked_desc}</p>
                   </div>
                 </div>
                 <Link
                   to="/pricing"
                   className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
                 >
-                  Fazer upgrade
+                  {t.forecast.upgrade}
                 </Link>
               </div>
             )}

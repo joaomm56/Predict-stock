@@ -2,8 +2,10 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { Activity, Mail, Lock, ArrowRight, ArrowLeft } from "lucide-react";
 import { useNavigate, Link } from "react-router-dom";
+import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
 import { usePageTitle } from "@/hooks/usePageTitle";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 const GoogleIcon = () => (
   <svg viewBox="0 0 24 24" className="h-4 w-4" aria-hidden="true">
@@ -15,22 +17,21 @@ const GoogleIcon = () => (
 );
 
 const Login = () => {
-  usePageTitle("Entrar");
+  usePageTitle("Sign in");
+  const { t } = useLanguage();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
     setLoading(true);
 
     const { error } = await supabase.auth.signInWithPassword({ email, password });
 
     if (error) {
-      setError(error.message);
+      toast.error(error.message);
     } else {
       navigate("/dashboard");
     }
@@ -60,7 +61,7 @@ const Login = () => {
         <div className="flex flex-col items-center mb-8">
           <Link to="/" className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors mb-4 self-start">
             <ArrowLeft className="h-4 w-4" />
-            Voltar ao início
+            {t.login.back}
           </Link>
           <div className="flex items-center gap-2 mb-6">
             <Activity className="h-7 w-7 text-primary" />
@@ -68,19 +69,19 @@ const Login = () => {
               Apex<span className="text-primary">Predict</span>
             </span>
           </div>
-          <h1 className="text-2xl font-bold text-foreground">Entrar na sua conta</h1>
-          <p className="text-sm text-muted-foreground mt-1">Acesse suas previsões e favoritos</p>
+          <h1 className="text-2xl font-bold text-foreground">{t.login.title}</h1>
+          <p className="text-sm text-muted-foreground mt-1">{t.login.desc}</p>
         </div>
 
         <div className="glass rounded-2xl p-8 box-glow">
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label className="block text-sm font-medium text-foreground mb-2">Email</label>
+              <label className="block text-sm font-medium text-foreground mb-2">{t.login.lbl_email}</label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <input
                   type="email"
-                  placeholder="seu@email.com"
+                  placeholder={t.login.ph_email}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
@@ -91,7 +92,7 @@ const Login = () => {
 
             <div>
               <div className="flex items-center justify-between mb-2">
-                <label className="block text-sm font-medium text-foreground">Senha</label>
+                <label className="block text-sm font-medium text-foreground">{t.login.lbl_password}</label>
               </div>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -105,25 +106,23 @@ const Login = () => {
                 />
               </div>
               <div className="flex justify-end mt-1">
-                <Link to="/forgot-password" className="text-xs text-primary hover:underline">Esqueceu a senha?</Link>
+                <Link to="/forgot-password" className="text-xs text-primary hover:underline">{t.login.forgot}</Link>
               </div>
             </div>
-
-            {error && <p className="text-sm text-destructive font-mono">{error}</p>}
 
             <button
               type="submit"
               disabled={loading}
               className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-6 py-3 font-semibold text-primary-foreground hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50"
             >
-              {loading ? "A entrar…" : "Entrar na minha conta"}
+              {loading ? t.login.btn_loading : t.login.btn_login}
               <ArrowRight className="h-4 w-4" />
             </button>
           </form>
 
           <div className="flex items-center gap-3 my-5">
             <div className="flex-1 h-px bg-border" />
-            <span className="text-xs text-muted-foreground font-mono">ou</span>
+            <span className="text-xs text-muted-foreground font-mono">{t.login.or}</span>
             <div className="flex-1 h-px bg-border" />
           </div>
 
@@ -133,13 +132,13 @@ const Login = () => {
             className="flex w-full items-center justify-center gap-3 rounded-lg border border-border bg-secondary px-6 py-3 text-sm font-semibold text-foreground hover:bg-secondary/80 transition-colors"
           >
             <GoogleIcon />
-            Continuar com Google
+            {t.login.google}
           </button>
 
           <p className="mt-6 text-center text-sm text-muted-foreground">
-            Não tem conta?{" "}
+            {t.login.no_account}{" "}
             <Link to="/register" className="text-primary hover:underline font-medium">
-              Criar grátis
+              {t.login.register_link}
             </Link>
           </p>
         </div>

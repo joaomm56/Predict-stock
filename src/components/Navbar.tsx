@@ -1,29 +1,53 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { TrendingUp, Activity, LogOut, User, Menu, X } from "lucide-react";
+import { TrendingUp, TrendingDown, Activity, LogOut, User, Menu, X } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
+import { getStockInfo } from "@/lib/api";
 
-const navLinks = [
-  { label: "Dashboard",  to: "/dashboard", protected: true  },
-  { label: "Mercado",    to: "/mercado",   protected: true  },
-  { label: "Previsões",  to: "/forecast",  protected: true  },
-  { label: "Análise",    to: "/analise",   protected: true  },
-  { label: "Portfólio",  to: "/portfolio", protected: true  },
-  { label: "Preços",     to: "/pricing",   protected: false },
+const NAV_ITEMS = [
+  { key: "dashboard" as const,   to: "/dashboard",   protected: true  },
+  { key: "market" as const,      to: "/mercado",     protected: true  },
+  { key: "forecasts" as const,   to: "/forecast",    protected: true  },
+  { key: "analysis" as const,    to: "/analise",     protected: true  },
+  { key: "portfolio" as const,   to: "/portfolio",   protected: true  },
+  { key: "alerts" as const,      to: "/alertas",     protected: true  },
+  { key: "compare" as const,     to: "/comparar",    protected: true  },
+  { key: "backtesting" as const, to: "/backtesting", protected: true  },
+  { key: "pricing" as const,     to: "/pricing",     protected: false },
 ];
 
 const Navbar = () => {
   const { user, signOut } = useAuth();
+  const { lang, setLang, t } = useLanguage();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [sp500, setSp500] = useState<{ change: number | null }>({ change: null });
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    const fetchSp500 = async () => {
+      try {
+        const data = await getStockInfo("^GSPC");
+        setSp500({ change: data.change ?? null });
+      } catch {
+        // keep previous value on error
+      }
+    };
+    fetchSp500();
+    intervalRef.current = setInterval(fetchSp500, 60_000);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, []);
 
   const handleSignOut = async () => {
     await signOut();
     window.location.href = "/";
   };
 
-  const handleNavClick = (item: typeof navLinks[0]) => {
+  const handleNavClick = (item: typeof NAV_ITEMS[0]) => {
     navigate(item.protected && !user ? "/login" : item.to);
     setMobileOpen(false);
   };
@@ -44,22 +68,38 @@ const Navbar = () => {
         </Link>
 
         <div className="hidden md:flex items-center gap-8">
-          {navLinks.map((item) => (
+          {NAV_ITEMS.map((item) => (
             <button
-              key={item.label}
+              key={item.key}
               onClick={() => handleNavClick(item)}
               className="text-sm text-muted-foreground hover:text-primary transition-colors font-medium"
             >
-              {item.label}
+              {t.nav[item.key]}
             </button>
           ))}
         </div>
 
         <div className="flex items-center gap-3">
+          {/* S&P 500 ticker */}
           <div className="hidden sm:flex items-center gap-2 rounded-lg bg-secondary px-3 py-1.5">
-            <TrendingUp className="h-3.5 w-3.5 text-chart-up" />
-            <span className="font-mono text-xs text-chart-up">S&P 500 +1.24%</span>
+            {sp500.change !== null && sp500.change < 0 ? (
+              <TrendingDown className="h-3.5 w-3.5 text-chart-down" />
+            ) : (
+              <TrendingUp className="h-3.5 w-3.5 text-chart-up" />
+            )}
+            <span className={`font-mono text-xs ${sp500.change !== null && sp500.change < 0 ? "text-chart-down" : "text-chart-up"}`}>
+              S&P 500 {sp500.change !== null ? `${sp500.change >= 0 ? "+" : ""}${sp500.change.toFixed(2)}%` : "…"}
+            </span>
           </div>
+
+          {/* Language toggle */}
+          <button
+            onClick={() => setLang(lang === "en" ? "pt" : "en")}
+            className="hidden sm:flex items-center gap-1 rounded-lg border border-border px-2.5 py-1.5 font-mono text-xs font-semibold text-muted-foreground hover:text-primary hover:border-primary transition-colors"
+            title={lang === "en" ? "Switch to Portuguese" : "Mudar para Inglês"}
+          >
+            {lang === "en" ? "PT" : "EN"}
+          </button>
 
           {user ? (
             <div className="flex items-center gap-2">
@@ -77,7 +117,7 @@ const Navbar = () => {
                 className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm font-medium text-muted-foreground hover:text-primary hover:border-primary transition-colors"
               >
                 <LogOut className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Sair</span>
+                <span className="hidden sm:inline">{t.nav.logout}</span>
               </button>
             </div>
           ) : (
@@ -85,11 +125,11 @@ const Navbar = () => {
               to="/login"
               className="hidden md:block rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
             >
-              Começar
+              {t.nav.register}
             </Link>
           )}
 
-          {/* Hamburger — mobile only */}
+          {/* Hamburger */}
           <button
             className="md:hidden flex items-center justify-center rounded-lg border border-border p-2 text-muted-foreground hover:text-primary hover:border-primary transition-colors"
             onClick={() => setMobileOpen((v) => !v)}
@@ -111,15 +151,22 @@ const Navbar = () => {
             className="md:hidden border-t border-border overflow-hidden"
           >
             <div className="container mx-auto px-6 py-4 flex flex-col gap-1">
-              {navLinks.map((item) => (
+              {NAV_ITEMS.map((item) => (
                 <button
-                  key={item.label}
+                  key={item.key}
                   onClick={() => handleNavClick(item)}
                   className="text-left px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-primary hover:bg-secondary transition-colors"
                 >
-                  {item.label}
+                  {t.nav[item.key]}
                 </button>
               ))}
+              {/* Language toggle mobile */}
+              <button
+                onClick={() => setLang(lang === "en" ? "pt" : "en")}
+                className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-primary hover:bg-secondary transition-colors"
+              >
+                🌐 {lang === "en" ? "Português" : "English"}
+              </button>
               {user ? (
                 <>
                   <Link
@@ -128,14 +175,14 @@ const Navbar = () => {
                     className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-primary hover:bg-secondary transition-colors"
                   >
                     <User className="h-4 w-4" />
-                    Perfil
+                    {t.nav.profile}
                   </Link>
                   <button
                     onClick={() => { setMobileOpen(false); handleSignOut(); }}
                     className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-destructive hover:bg-secondary transition-colors"
                   >
                     <LogOut className="h-4 w-4" />
-                    Sair
+                    {t.nav.logout}
                   </button>
                 </>
               ) : (
@@ -144,7 +191,7 @@ const Navbar = () => {
                   onClick={() => setMobileOpen(false)}
                   className="mt-2 flex items-center justify-center rounded-lg bg-primary px-6 py-3 text-sm font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
                 >
-                  Começar
+                  {t.nav.register}
                 </Link>
               )}
             </div>

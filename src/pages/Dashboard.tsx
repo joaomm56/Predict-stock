@@ -8,8 +8,10 @@ import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
 } from "recharts";
 import Navbar from "@/components/Navbar";
+import OnboardingWizard, { useOnboarding } from "@/components/OnboardingWizard";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { getStockInfo, getHistory } from "@/lib/api";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import { usePlan, getForecastUsage } from "@/hooks/usePlan";
@@ -33,7 +35,7 @@ const ChartTooltip = ({ active, payload, label }: any) => {
       <p className="text-muted-foreground mb-1">{label}</p>
       {payload.map((p: any) => (
         <p key={p.name} style={{ color: p.color }}>
-          {p.name === "real" ? "Preço Real" : "Previsão IA"}: ${p.value}
+          {p.name}: ${p.value}
         </p>
       ))}
     </div>
@@ -44,6 +46,7 @@ const ChartTooltip = ({ active, payload, label }: any) => {
 const Dashboard = () => {
   usePageTitle("Dashboard");
   const { user } = useAuth();
+  const { t } = useLanguage();
   const { plan, limits } = usePlan();
   const navigate = useNavigate();
 
@@ -71,6 +74,19 @@ const Dashboard = () => {
   }
   const [history, setHistory] = useState<ForecastRow[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
+  const [filterTicker, setFilterTicker] = useState("");
+
+  const filteredHistory = filterTicker.trim()
+    ? history.filter((h) => h.ticker.includes(filterTicker.trim().toUpperCase()))
+    : history;
+
+  const { done: onboardingDone, dismiss: dismissOnboarding } = useOnboarding();
+  const [showOnboarding, setShowOnboarding] = useState(!onboardingDone);
+
+  const handleDismissOnboarding = () => {
+    dismissOnboarding();
+    setShowOnboarding(false);
+  };
 
   const firstName   = (user?.user_metadata?.full_name ?? user?.email ?? "").split(" ")[0];
   const avgAccuracy = history.length > 0
@@ -154,15 +170,16 @@ const Dashboard = () => {
   }, [user]);
 
   const stats = [
-    { icon: Heart,      label: "A seguir",            value: favsLoading ? "…" : favs.length,  color: "text-rose-400" },
-    { icon: Zap,        label: "Precisão Média",       value: avgAccuracy === "—" ? "—" : `${avgAccuracy}%`, color: "text-primary"  },
-    { icon: TrendingUp, label: "Taxa de Acerto",       value: hitRate     === "—" ? "—" : `${hitRate}%`,     color: "text-chart-up" },
-    { icon: BarChart2,  label: "Previsões Rastreadas", value: history.length,                   color: "text-accent"   },
+    { icon: Heart,      label: t.dashboard.stat_following, value: favsLoading ? "…" : favs.length,  color: "text-rose-400" },
+    { icon: Zap,        label: t.dashboard.stat_accuracy,  value: avgAccuracy === "—" ? "—" : `${avgAccuracy}%`, color: "text-primary"  },
+    { icon: TrendingUp, label: t.dashboard.stat_hitrate,   value: hitRate     === "—" ? "—" : `${hitRate}%`,     color: "text-chart-up" },
+    { icon: BarChart2,  label: t.dashboard.stat_tracked,   value: history.length,                   color: "text-accent"   },
   ];
 
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
+      {showOnboarding && <OnboardingWizard onDone={handleDismissOnboarding} />}
 
       <div className="container mx-auto px-6 pt-28 pb-20 max-w-6xl">
 
@@ -178,20 +195,22 @@ const Dashboard = () => {
             className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors mb-4"
           >
             <ArrowLeft className="h-4 w-4" />
-            Voltar ao início
+            {t.dashboard.back}
           </button>
           <h1 className="text-3xl font-bold text-foreground">
-            Meu <span className="text-primary">Dashboard</span>
+            <span className="text-primary">{t.dashboard.title}</span>
           </h1>
           <div className="flex items-center gap-3 mt-1 flex-wrap">
-            <p className="text-muted-foreground">Bem-vindo, {firstName}</p>
+            <p className="text-muted-foreground">{t.dashboard.welcome} {firstName}</p>
             <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 border border-primary/20 px-2.5 py-0.5 text-xs font-semibold text-primary capitalize">
               {plan}
             </span>
             {plan === "free" && (
               <span className="inline-flex items-center gap-1 text-xs text-muted-foreground font-mono">
                 <Zap className="h-3 w-3" />
-                {forecastsLeft === 0 ? "Limite de previsões atingido" : `${forecastsLeft}/${limits.forecastsPerDay} previsões hoje`}
+                {forecastsLeft === 0
+                  ? t.dashboard.limit_reached
+                  : t.dashboard.forecasts_left.replace("{n}", String(forecastsLeft)).replace("{max}", String(limits.forecastsPerDay))}
               </span>
             )}
           </div>
@@ -211,7 +230,11 @@ const Dashboard = () => {
                 <s.icon className={`h-5 w-5 ${s.color}`} />
               </div>
               <div>
-                <p className="text-xl font-bold font-mono text-foreground">{s.value}</p>
+                {favsLoading || historyLoading ? (
+                  <div className="h-6 w-14 rounded bg-secondary animate-pulse mb-1" />
+                ) : (
+                  <p className="text-xl font-bold font-mono text-foreground">{s.value}</p>
+                )}
                 <p className="text-xs text-muted-foreground">{s.label}</p>
               </div>
             </motion.div>
@@ -231,10 +254,10 @@ const Dashboard = () => {
             <div className="flex items-center justify-between mb-5">
               <div className="flex items-center gap-2">
                 <Heart className="h-4 w-4 text-rose-400" />
-                <h2 className="font-semibold text-foreground">A Seguir</h2>
+                <h2 className="font-semibold text-foreground">{t.dashboard.watching}</h2>
               </div>
               {favs.length > 0 && (
-                <Link to="/portfolio" className="text-xs text-primary hover:underline">Ver tudo</Link>
+                <Link to="/portfolio" className="text-xs text-primary hover:underline">{t.dashboard.view_all}</Link>
               )}
             </div>
 
@@ -242,9 +265,9 @@ const Dashboard = () => {
               <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 mb-4">
                 <Lock className="h-3.5 w-3.5 text-destructive flex-shrink-0" />
                 <p className="text-xs text-destructive flex-1">
-                  Tens {favs.length} ações — limite Free é {limits.portfolioMax}.
+                  {t.dashboard.limit_banner.replace("{n}", String(favs.length)).replace("{max}", String(limits.portfolioMax)).replace("{diff}", String(favs.length - limits.portfolioMax))}
                 </p>
-                <Link to="/portfolio" className="text-xs font-semibold text-primary whitespace-nowrap">Gerir</Link>
+                <Link to="/portfolio" className="text-xs font-semibold text-primary whitespace-nowrap">{t.dashboard.manage}</Link>
               </div>
             )}
 
@@ -269,9 +292,9 @@ const Dashboard = () => {
             ) : favs.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-10 text-center flex-1">
                 <Heart className="h-10 w-10 text-muted-foreground/20 mb-3" />
-                <p className="text-sm text-muted-foreground mb-3">Ainda não segues nenhuma ação.</p>
+                <p className="text-sm text-muted-foreground mb-3">{t.dashboard.no_stocks}</p>
                 <Link to="/portfolio" className="text-sm text-primary hover:underline">
-                  Adicionar ao portfólio
+                  {t.dashboard.add_portfolio}
                 </Link>
               </div>
             ) : (
@@ -313,8 +336,8 @@ const Dashboard = () => {
           >
             <div className="flex items-center gap-2 mb-3">
               <BarChart2 className="h-4 w-4 text-primary" />
-              <h2 className="font-semibold text-foreground">Evolução do Portfólio</h2>
-              {perfLoading && <span className="text-xs text-muted-foreground font-mono animate-pulse">a carregar…</span>}
+              <h2 className="font-semibold text-foreground">{t.dashboard.portfolio_chart}</h2>
+              {perfLoading && <span className="text-xs text-muted-foreground font-mono animate-pulse">{t.dashboard.loading}</span>}
             </div>
             {favs.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mb-4">
@@ -345,13 +368,13 @@ const Dashboard = () => {
                   <XAxis dataKey="mes" tick={{ fontSize: 10, fill: "hsl(220 10% 50%)" }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fontSize: 10, fill: "hsl(220 10% 50%)" }} axisLine={false} tickLine={false} domain={["auto", "auto"]} />
                   <Tooltip content={<ChartTooltip />} />
-                  <Area type="monotone" dataKey="real" name="Preço Real" stroke="hsl(175 80% 50%)" strokeWidth={2} fill="url(#gradReal)" dot={false} />
+                  <Area type="monotone" dataKey="real" name={t.common.real_price} stroke="hsl(175 80% 50%)" strokeWidth={2} fill="url(#gradReal)" dot={false} />
                 </AreaChart>
               </ResponsiveContainer>
             ) : (
               <div className="flex flex-col items-center justify-center h-[220px] text-center">
                 <BarChart2 className="h-8 w-8 text-muted-foreground/20 mb-2" />
-                <p className="text-sm text-muted-foreground">Adiciona ações ao portfólio para ver o gráfico.</p>
+                <p className="text-sm text-muted-foreground">{t.dashboard.no_chart}</p>
               </div>
             )}
           </motion.div>
@@ -364,41 +387,62 @@ const Dashboard = () => {
           transition={{ duration: 0.5, delay: 0.3 }}
           className="glass rounded-2xl overflow-hidden"
         >
-          <div className="flex items-center gap-2 px-6 py-4 border-b border-border">
-            <Clock className="h-4 w-4 text-primary" />
-            <h2 className="font-semibold text-foreground">Histórico de Performance</h2>
+          <div className="flex items-center justify-between gap-4 px-6 py-4 border-b border-border flex-wrap">
+            <div className="flex items-center gap-2">
+              <Clock className="h-4 w-4 text-primary" />
+              <h2 className="font-semibold text-foreground">{t.dashboard.history_title}</h2>
+            </div>
+            {history.length > 0 && (
+              <input
+                type="text"
+                placeholder={t.dashboard.filter_placeholder}
+                value={filterTicker}
+                onChange={(e) => setFilterTicker(e.target.value)}
+                className="rounded-lg bg-secondary border border-border px-3 py-1.5 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary w-36"
+              />
+            )}
           </div>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-border">
-                  {["Data", "Ativo", "Preço Atual", "Previsão", "Horizonte", "Tendência", "Precisão"].map((h) => (
+                  {[t.dashboard.th_date, t.dashboard.th_asset, t.dashboard.th_price, t.dashboard.th_forecast, t.dashboard.th_horizon, t.dashboard.th_trend, t.dashboard.th_accuracy].map((h) => (
                     <th key={h} className="px-6 py-3 text-left text-xs font-mono text-muted-foreground">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {historyLoading ? (
-                  <tr>
-                    <td colSpan={7} className="px-6 py-10 text-center text-sm text-muted-foreground font-mono">
-                      A carregar…
-                    </td>
-                  </tr>
+                  [1, 2, 3, 4, 5].map((n) => (
+                    <tr key={n} className="border-b border-border last:border-0">
+                      {[112, 64, 80, 80, 52, 72, 52].map((w, ci) => (
+                        <td key={ci} className="px-6 py-4">
+                          <div className="h-3.5 rounded bg-secondary animate-pulse" style={{ width: w }} />
+                        </td>
+                      ))}
+                    </tr>
+                  ))
                 ) : history.length === 0 ? (
                   <tr>
                     <td colSpan={7} className="px-6 py-10 text-center text-sm text-muted-foreground">
-                      Ainda não geraste nenhuma previsão.{" "}
-                      <Link to="/forecast" className="text-primary underline underline-offset-2">Gerar agora</Link>
+                      {t.dashboard.no_history}{" "}
+                      <Link to="/forecast" className="text-primary underline underline-offset-2">{t.dashboard.gen_now}</Link>
                     </td>
                   </tr>
-                ) : history.map((row) => {
+                ) : filteredHistory.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-6 py-10 text-center text-sm text-muted-foreground font-mono">
+                      {t.dashboard.no_results.replace("{q}", filterTicker.toUpperCase())}
+                    </td>
+                  </tr>
+                ) : filteredHistory.map((row) => {
                   const isUp = row.predicted_price >= row.last_price;
                   const changePct = (((row.predicted_price - row.last_price) / row.last_price) * 100).toFixed(2);
                   const accuracy = Math.max(0, 100 - (row.mape ?? 100)).toFixed(1);
                   return (
                     <tr key={row.id} className="hover:bg-secondary/20 transition-colors">
                       <td className="px-6 py-4 text-sm text-muted-foreground font-mono">
-                        {new Date(row.created_at).toLocaleDateString("pt-PT")}
+                        {new Date(row.created_at).toLocaleDateString()}
                       </td>
                       <td className="px-6 py-4">
                         <span className="font-mono text-sm font-bold text-primary">{row.ticker}</span>

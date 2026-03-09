@@ -7,6 +7,7 @@ import Navbar from "@/components/Navbar";
 import { getStockInfo, getHistory, type StockInfo } from "@/lib/api";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/lib/supabase";
 import { usePlan } from "@/hooks/usePlan";
 
@@ -40,8 +41,9 @@ function formatPrice(price: number | null, currency = "USD"): string {
 }
 
 const Mercado = () => {
-  usePageTitle("Mercado");
+  usePageTitle("Market");
   const { user } = useAuth();
+  const { t } = useLanguage();
   const { limits } = usePlan();
   const navigate = useNavigate();
 
@@ -59,7 +61,7 @@ const Mercado = () => {
     { label: "1A", value: "1y" },
     { label: "2A", value: "2y" },
     { label: "5A", value: "5y" },
-    { label: "Máx", value: "max" },
+    { label: t.mercado.period_max, value: "max" },
   ];
 
   // Expanded panel
@@ -183,16 +185,16 @@ const Mercado = () => {
           <div>
             <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 border border-primary/20 px-4 py-1.5 mb-4">
               <BarChart3 className="h-3.5 w-3.5 text-primary" />
-              <span className="font-mono text-xs text-primary">Mercado Global</span>
+              <span className="font-mono text-xs text-primary">{t.mercado.badge}</span>
             </div>
             <h1 className="text-3xl font-bold text-foreground">
-              Visão do <span className="text-primary">Mercado</span>
+              {t.mercado.title} <span className="text-primary">{t.mercado.title_hl}</span>
             </h1>
             <p className="text-muted-foreground mt-1">
-              Principais índices e ações em tempo real.
+              {t.mercado.desc}
               {lastUpdated && (
                 <span className="ml-2 font-mono text-xs">
-                  Atualizado às {lastUpdated.toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}
+                  {t.mercado.updated} {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                 </span>
               )}
             </p>
@@ -203,7 +205,7 @@ const Mercado = () => {
             className="flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm text-muted-foreground hover:text-primary hover:border-primary transition-colors disabled:opacity-50"
           >
             <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-            Atualizar
+            {t.mercado.refresh}
           </button>
         </motion.div>
 
@@ -224,7 +226,7 @@ const Mercado = () => {
                   <div className="h-4 w-16 rounded bg-secondary animate-pulse" />
                 </div>
               ) : idx.error ? (
-                <p className="text-xs text-destructive font-mono mt-2">Indisponível</p>
+                <p className="text-xs text-destructive font-mono mt-2">{t.mercado.unavailable}</p>
               ) : (
                 <>
                   <p className="font-mono text-xl font-bold text-foreground">
@@ -248,10 +250,10 @@ const Mercado = () => {
             className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3"
           >
             <p className="text-sm text-destructive font-mono">
-              Limite de {limits.portfolioMax} ações atingido no plano Free.
+              {t.mercado.limit_banner.replace("{max}", String(limits.portfolioMax))}
             </p>
             <Link to="/pricing" className="text-xs font-semibold text-primary hover:opacity-80 transition-opacity">
-              Fazer upgrade
+              {t.mercado.upgrade}
             </Link>
           </motion.div>
         )}
@@ -264,8 +266,8 @@ const Mercado = () => {
           className="glass rounded-2xl overflow-hidden"
         >
           <div className="px-6 py-4 border-b border-border">
-            <h2 className="font-semibold text-foreground">Ações em Destaque</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">Clique numa ação para ver o gráfico</p>
+            <h2 className="font-semibold text-foreground">{t.mercado.stocks_title}</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">{t.mercado.stocks_hint}</p>
           </div>
           <div className="divide-y divide-border">
             {(loading ? skeletonStocks : stocks).map((s) => (
@@ -287,7 +289,11 @@ const Mercado = () => {
                     </div>
                     <div>
                       <p className="font-mono text-sm font-semibold text-foreground">{s.ticker}</p>
-                      <p className="text-xs text-muted-foreground">{s.info?.name ?? "—"}</p>
+                      {loading ? (
+                        <div className="h-3 w-28 rounded bg-secondary animate-pulse mt-1" />
+                      ) : (
+                        <p className="text-xs text-muted-foreground">{s.info?.name ?? "—"}</p>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-4">
@@ -298,7 +304,7 @@ const Mercado = () => {
                           <div className="h-3 w-14 rounded bg-secondary animate-pulse ml-auto" />
                         </div>
                       ) : s.error ? (
-                        <p className="text-xs text-destructive font-mono">Indisponível</p>
+                        <p className="text-xs text-destructive font-mono">{t.mercado.unavailable}</p>
                       ) : (
                         <>
                           <p className="font-mono text-sm font-semibold text-foreground">
@@ -372,7 +378,7 @@ const Mercado = () => {
                             </div>
                             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                               <span className="h-1.5 w-1.5 rounded-full bg-chart-up animate-pulse" />
-                              Ao vivo
+                              {t.mercado.live}
                             </div>
                             <button
                               onClick={(e) => { e.stopPropagation(); handleRowClick(s.ticker); }}
@@ -420,7 +426,7 @@ const Mercado = () => {
                                     borderRadius: "8px",
                                     fontSize: "12px",
                                   }}
-                                  formatter={(v: number) => [`$${v.toFixed(2)}`, "Preço"]}
+                                  formatter={(v: number) => [`$${v.toFixed(2)}`, t.common.price]}
                                 />
                                 <Area
                                   type="monotone"
@@ -434,7 +440,7 @@ const Mercado = () => {
                             </ResponsiveContainer>
                           </div>
                         ) : (
-                          <p className="text-xs text-muted-foreground text-center py-10">Sem dados disponíveis.</p>
+                          <p className="text-xs text-muted-foreground text-center py-10">{t.comparar.err_load}</p>
                         )}
 
                         {/* Actions */}
@@ -444,14 +450,14 @@ const Mercado = () => {
                             className="flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground hover:opacity-90 transition-opacity"
                           >
                             <Cpu className="h-3.5 w-3.5" />
-                            Gerar Previsão
+                            {t.mercado.btn_forecast}
                           </button>
                           <button
                             onClick={(e) => { e.stopPropagation(); navigate(`/analise?ticker=${s.ticker}`); }}
                             className="flex items-center gap-1.5 rounded-lg border border-border px-4 py-2 text-xs font-semibold text-foreground hover:border-primary hover:text-primary transition-colors"
                           >
                             <ExternalLink className="h-3.5 w-3.5" />
-                            Análise completa
+                            {t.mercado.btn_analysis}
                           </button>
                         </div>
                       </div>

@@ -5,78 +5,62 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import Navbar from "@/components/Navbar";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/lib/supabase";
 import { createCheckoutSession, verifyCheckout } from "@/lib/api";
 
-const plans = [
-  {
-    key: "free",
-    name: "Free",
-    price: "€0",
-    period: "para sempre",
-    description: "Para quem quer experimentar",
-    highlight: false,
-    badge: null,
-    features: [
-      { label: "5 previsões por dia", included: true },
-      { label: "Acesso ao mercado", included: true },
-      { label: "Portfólio básico (3 ações)", included: true },
-      { label: "Dados históricos (30 dias)", included: true },
-      { label: "Métricas avançadas (R², MAE)", included: false },
-      { label: "Previsões ilimitadas", included: false },
-      { label: "Análise técnica completa", included: false },
-      { label: "Exportação de dados", included: false },
-    ],
-    cta: "Começar grátis",
-    ctaVariant: "outline",
-  },
-  {
-    key: "pro",
-    name: "Pro",
-    price: "€9.99",
-    period: "/ mês",
-    description: "Para investidores ativos",
-    highlight: true,
-    badge: "Mais popular",
-    features: [
-      { label: "Previsões ilimitadas", included: true },
-      { label: "Acesso ao mercado", included: true },
-      { label: "Portfólio ilimitado", included: true },
-      { label: "Dados históricos (2 anos)", included: true },
-      { label: "Métricas avançadas (R², MAE)", included: true },
-      { label: "Análise técnica completa", included: true },
-      { label: "Exportação de dados (CSV)", included: false },
-      { label: "Suporte prioritário", included: false },
-    ],
-    cta: "Começar Pro",
-    ctaVariant: "primary",
-  },
-  {
-    key: "premium",
-    name: "Premium",
-    price: "€24.99",
-    period: "/ mês",
-    description: "Para profissionais",
-    highlight: false,
-    badge: null,
-    features: [
-      { label: "Previsões ilimitadas", included: true },
-      { label: "Acesso ao mercado", included: true },
-      { label: "Portfólio ilimitado", included: true },
-      { label: "Dados históricos (10 anos)", included: true },
-      { label: "Métricas avançadas (R², MAE)", included: true },
-      { label: "Análise técnica completa", included: true },
-      { label: "Exportação de dados (CSV/PDF)", included: true },
-      { label: "Suporte prioritário", included: true },
-    ],
-    cta: "Começar Premium",
-    ctaVariant: "outline",
-  },
-];
-
 const Pricing = () => {
-  usePageTitle("Preços");
+  usePageTitle("Pricing");
   const { user } = useAuth();
+  const { t } = useLanguage();
+
+  const plans = [
+    {
+      key: "free",   name: "Free",    price: "€0",    period: t.pricing.free_period,
+      description: t.pricing.free_desc, highlight: false, badge: null as string | null,
+      features: [
+        { label: t.pricing.f_5forecasts, included: true },
+        { label: t.pricing.f_market,     included: true },
+        { label: t.pricing.f_portfolio3, included: true },
+        { label: t.pricing.f_hist30,     included: true },
+        { label: t.pricing.f_metrics,    included: false },
+        { label: t.pricing.f_unlimited,  included: false },
+        { label: t.pricing.f_tech,       included: false },
+        { label: t.pricing.f_csv,        included: false },
+      ],
+      cta: t.pricing.cta_free, ctaVariant: "outline",
+    },
+    {
+      key: "pro",    name: "Pro",     price: "€9.99", period: t.pricing.month,
+      description: t.pricing.pro_desc, highlight: true, badge: t.pricing.popular_badge as string | null,
+      features: [
+        { label: t.pricing.f_unlimited,  included: true },
+        { label: t.pricing.f_market,     included: true },
+        { label: t.pricing.f_portfolio8, included: true },
+        { label: t.pricing.f_hist2y,     included: true },
+        { label: t.pricing.f_metrics,    included: true },
+        { label: t.pricing.f_tech,       included: true },
+        { label: t.pricing.f_csv,        included: false },
+        { label: t.pricing.f_support,    included: false },
+      ],
+      cta: t.pricing.cta_pro, ctaVariant: "primary",
+    },
+    {
+      key: "premium", name: "Premium", price: "€24.99", period: t.pricing.month,
+      description: t.pricing.premium_desc, highlight: false, badge: null as string | null,
+      features: [
+        { label: t.pricing.f_unlimited,   included: true },
+        { label: t.pricing.f_market,      included: true },
+        { label: t.pricing.f_portfolio8,  included: true },
+        { label: t.pricing.f_hist10y,     included: true },
+        { label: t.pricing.f_metrics,     included: true },
+        { label: t.pricing.f_tech,        included: true },
+        { label: t.pricing.f_full_export, included: true },
+        { label: t.pricing.f_support,     included: true },
+      ],
+      cta: t.pricing.cta_premium, ctaVariant: "outline",
+    },
+  ];
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const currentPlan: string = user?.user_metadata?.plan ?? "free";
@@ -93,24 +77,24 @@ const Pricing = () => {
 
     if (cancelled) {
       setBannerType("error");
-      setBannerMsg("Pagamento cancelado. Podes tentar novamente quando quiseres.");
+      setBannerMsg(t.pricing.cancel_err);
       setSearchParams({}, { replace: true });
       return;
     }
 
     if (success && sessionId && user) {
-      setBannerMsg("A verificar pagamento…");
+      setBannerMsg(t.pricing.loading);
       setBannerType("success");
       verifyCheckout(sessionId)
         .then(async ({ plan }) => {
           await supabase.auth.updateUser({ data: { plan } });
           setSuccessPlan(plan);
-          setBannerMsg(`Plano ${plan.charAt(0).toUpperCase() + plan.slice(1)} ativado com sucesso!`);
+          setBannerMsg(t.pricing.success.replace("{plan}", plan.charAt(0).toUpperCase() + plan.slice(1)));
           setBannerType("success");
         })
         .catch(() => {
           setBannerType("error");
-          setBannerMsg("Não foi possível verificar o pagamento. Contacta o suporte.");
+          setBannerMsg(t.common.error);
         })
         .finally(() => {
           setSearchParams({}, { replace: true });
@@ -132,7 +116,7 @@ const Pricing = () => {
       setLoadingPlan(null);
       setSuccessPlan("free");
       setBannerType("success");
-      setBannerMsg("Passou para o plano Free.");
+      setBannerMsg(t.pricing.success.replace("{plan}", "Free"));
       return;
     }
 
@@ -144,7 +128,7 @@ const Pricing = () => {
     } catch {
       setLoadingPlan(null);
       setBannerType("error");
-      setBannerMsg("Erro ao iniciar pagamento. Tenta novamente.");
+      setBannerMsg(t.common.error);
     }
   };
 
@@ -160,10 +144,10 @@ const Pricing = () => {
           className="text-center mb-16"
         >
           <h1 className="text-4xl md:text-5xl font-bold text-foreground mb-4">
-            Planos simples e <span className="text-primary text-glow">honestos</span>
+            {t.pricing.title} <span className="text-primary text-glow">{t.pricing.title_hl}</span>
           </h1>
           <p className="text-muted-foreground text-lg max-w-lg mx-auto">
-            Sem cobranças escondidas. Comece grátis hoje mesmo.
+            {t.pricing.desc}
           </p>
         </motion.div>
 
@@ -221,7 +205,7 @@ const Pricing = () => {
                     {isCurrent && (
                       <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-[10px] font-semibold text-primary">
                         <CheckCircle className="h-2.5 w-2.5" />
-                        Plano atual
+                        {t.pricing.current}
                       </span>
                     )}
                   </div>
@@ -265,10 +249,10 @@ const Pricing = () => {
                   {isLoading ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      A redirecionar…
+                      {t.pricing.loading}
                     </>
                   ) : isCurrent ? (
-                    "Plano atual"
+                    t.pricing.current
                   ) : (
                     plan.cta
                   )}
@@ -279,7 +263,7 @@ const Pricing = () => {
         </div>
 
         <p className="text-center text-xs text-muted-foreground mt-10">
-          Pagamento seguro via Stripe. Cancela a qualquer momento.
+          {t.pricing.footer}
         </p>
       </div>
     </div>

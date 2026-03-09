@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import Navbar from "@/components/Navbar";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLanguage } from "@/contexts/LanguageContext";
 import { getStockInfo } from "@/lib/api";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import { usePlan } from "@/hooks/usePlan";
@@ -17,8 +18,9 @@ interface Favorite {
 }
 
 const Portfolio = () => {
-  usePageTitle("Portfólio");
+  usePageTitle("Portfolio");
   const { user } = useAuth();
+  const { t } = useLanguage();
   const { plan, limits } = usePlan();
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [newTicker, setNewTicker] = useState("");
@@ -70,14 +72,14 @@ const Portfolio = () => {
 
     // Check plan portfolio limit
     if (limits.portfolioMax !== Infinity && favorites.length >= limits.portfolioMax) {
-      setError(`O plano Free permite no máximo ${limits.portfolioMax} ações. Faz upgrade para adicionar mais.`);
+      setError(t.portfolio.limit_err.replace("{max}", String(limits.portfolioMax)));
       setAdding(false);
       return;
     }
 
     // Check for duplicates
     if (favorites.some((f) => f.ticker === ticker)) {
-      setError("Essa ação já está no teu portfólio.");
+      setError(t.portfolio.already_in);
       setAdding(false);
       return;
     }
@@ -86,7 +88,7 @@ const Portfolio = () => {
     try {
       await getStockInfo(ticker);
     } catch {
-      setError("Ticker não encontrado. Verifica o símbolo e tenta novamente.");
+      setError(t.portfolio.not_found);
       setAdding(false);
       return;
     }
@@ -122,20 +124,20 @@ const Portfolio = () => {
         >
           <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 border border-primary/20 px-4 py-1.5 mb-4">
             <Briefcase className="h-3.5 w-3.5 text-primary" />
-            <span className="font-mono text-xs text-primary">O Meu Portfólio</span>
+            <span className="font-mono text-xs text-primary">{t.portfolio.badge}</span>
           </div>
           <div className="flex items-center justify-between gap-4">
-            <h1 className="text-3xl font-bold text-foreground">As Minhas <span className="text-primary">Ações</span></h1>
+            <h1 className="text-3xl font-bold text-foreground">{t.portfolio.title} <span className="text-primary">{t.portfolio.title_hl}</span></h1>
             <button
               onClick={handleRefresh}
               disabled={refreshing || loading}
               className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:text-primary hover:border-primary transition-colors disabled:opacity-40"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
-              Atualizar
+              {t.portfolio.refresh}
             </button>
           </div>
-          <p className="text-muted-foreground mt-1">Guarda os tickers que queres acompanhar.</p>
+          <p className="text-muted-foreground mt-1">{t.portfolio.desc}</p>
         </motion.div>
 
         {/* Plan limit banner */}
@@ -153,16 +155,16 @@ const Portfolio = () => {
               <Lock className={`h-3.5 w-3.5 flex-shrink-0 ${favorites.length > limits.portfolioMax ? "text-destructive" : "text-muted-foreground"}`} />
               {favorites.length > limits.portfolioMax ? (
                 <span className="text-destructive">
-                  Tens <strong>{favorites.length}</strong> ações mas o plano Free só permite <strong>{limits.portfolioMax}</strong>. Remove {favorites.length - limits.portfolioMax} para ficares em conformidade.
+                  {t.portfolio.plan_over.replace("{n}", String(favorites.length)).replace("{max}", String(limits.portfolioMax)).replace("{diff}", String(favorites.length - limits.portfolioMax))}
                 </span>
               ) : (
                 <span className="text-muted-foreground">
-                  Plano Free: <span className="text-foreground font-semibold">{favorites.length} / {limits.portfolioMax}</span> ações
+                  {t.portfolio.plan_free.replace("{n}", String(favorites.length)).replace("{max}", String(limits.portfolioMax))}
                 </span>
               )}
             </div>
             <Link to="/pricing" className="text-xs font-semibold text-primary hover:opacity-80 transition-opacity whitespace-nowrap">
-              Fazer upgrade
+              {t.portfolio.upgrade}
             </Link>
           </motion.div>
         )}
@@ -177,7 +179,7 @@ const Portfolio = () => {
         >
           <input
             type="text"
-            placeholder="Adicionar ticker (ex: AAPL)"
+            placeholder={t.portfolio.ph_ticker}
             value={newTicker}
             onChange={(e) => setNewTicker(e.target.value.toUpperCase())}
             className="flex-1 rounded-lg bg-secondary border border-border px-4 py-3 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
@@ -188,11 +190,67 @@ const Portfolio = () => {
             className="flex items-center gap-2 rounded-lg bg-primary px-4 py-3 font-semibold text-sm text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40"
           >
             <Plus className="h-4 w-4" />
-            {adding ? "…" : "Adicionar"}
+            {adding ? t.portfolio.btn_adding : t.portfolio.btn_add}
           </button>
         </motion.form>
 
         {error && <p className="text-sm text-destructive font-mono mb-4">{error}</p>}
+
+        {/* Resumo */}
+        {!loading && favorites.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="glass rounded-xl px-5 py-4 mb-6 flex flex-wrap gap-6"
+          >
+            <div>
+              <p className="text-xs text-muted-foreground font-mono mb-0.5">{t.portfolio.summary_count}</p>
+              <p className="font-mono text-xl font-bold text-foreground">{favorites.length}</p>
+            </div>
+            {favorites.some((f) => f.price != null) && (
+              <>
+                <div>
+                  <p className="text-xs text-muted-foreground font-mono mb-0.5">{t.portfolio.summary_best}</p>
+                  <p className={`font-mono text-xl font-bold ${
+                    Math.max(...favorites.filter(f => f.change != null).map(f => f.change!)) >= 0
+                      ? "text-chart-up" : "text-chart-down"
+                  }`}>
+                    {(() => {
+                      const best = favorites.filter(f => f.change != null).sort((a, b) => b.change! - a.change!)[0];
+                      return best ? `${best.ticker} ${best.change! >= 0 ? "+" : ""}${best.change!.toFixed(2)}%` : "—";
+                    })()}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground font-mono mb-0.5">{t.portfolio.summary_worst}</p>
+                  <p className={`font-mono text-xl font-bold ${
+                    Math.min(...favorites.filter(f => f.change != null).map(f => f.change!)) >= 0
+                      ? "text-chart-up" : "text-chart-down"
+                  }`}>
+                    {(() => {
+                      const worst = favorites.filter(f => f.change != null).sort((a, b) => a.change! - b.change!)[0];
+                      return worst ? `${worst.ticker} ${worst.change! >= 0 ? "+" : ""}${worst.change!.toFixed(2)}%` : "—";
+                    })()}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground font-mono mb-0.5">{t.portfolio.summary_avg}</p>
+                  <p className={`font-mono text-xl font-bold ${
+                    favorites.filter(f => f.change != null).reduce((s, f) => s + f.change!, 0) /
+                    favorites.filter(f => f.change != null).length >= 0 ? "text-chart-up" : "text-chart-down"
+                  }`}>
+                    {(() => {
+                      const withChange = favorites.filter(f => f.change != null);
+                      if (!withChange.length) return "—";
+                      const avg = withChange.reduce((s, f) => s + f.change!, 0) / withChange.length;
+                      return `${avg >= 0 ? "+" : ""}${avg.toFixed(2)}%`;
+                    })()}
+                  </p>
+                </div>
+              </>
+            )}
+          </motion.div>
+        )}
 
         {/* Lista */}
         {loading ? (
@@ -206,7 +264,7 @@ const Portfolio = () => {
             className="glass rounded-2xl p-12 text-center"
           >
             <Briefcase className="h-10 w-10 text-primary/40 mx-auto mb-3" />
-            <p className="text-muted-foreground text-sm">Ainda não tens ações guardadas.</p>
+            <p className="text-muted-foreground text-sm">{t.portfolio.empty}</p>
           </motion.div>
         ) : (
           <div className="space-y-3">

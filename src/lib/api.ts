@@ -94,6 +94,25 @@ export function getForecast(req: ForecastRequest) {
   });
 }
 
+export interface IndicatorsResponse {
+  ticker: string;
+  dates: string[];
+  close: number[];
+  rsi: (number | null)[];
+  macd: (number | null)[];
+  macd_signal: (number | null)[];
+  macd_hist: (number | null)[];
+  bb_upper: (number | null)[];
+  bb_mid: (number | null)[];
+  bb_lower: (number | null)[];
+}
+
+export function getIndicators(ticker: string, period = "1y") {
+  return apiFetch<IndicatorsResponse>(
+    `/indicators/${encodeURIComponent(ticker.toUpperCase())}?period=${period}`
+  );
+}
+
 export function createCheckoutSession(plan: string, user_id: string) {
   return apiFetch<{ url: string }>("/create-checkout-session", {
     method: "POST",

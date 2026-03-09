@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 export interface ChartPoint {
   name: string;
@@ -10,7 +11,7 @@ export interface ChartPoint {
 const generateData = () => {
   const data = [];
   let price = 185;
-  const months = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   for (let i = 0; i < 24; i++) {
     price += (Math.random() - 0.4) * 8;
     data.push({
@@ -27,6 +28,7 @@ interface StockChartProps {
 }
 
 const StockChart = ({ chartData }: StockChartProps) => {
+  const { t } = useLanguage();
   const [randomData, setRandomData] = useState(generateData);
 
   useEffect(() => {
@@ -82,7 +84,7 @@ const StockChart = ({ chartData }: StockChartProps) => {
             strokeWidth={2}
             fillOpacity={1}
             fill="url(#colorPrice)"
-            name="Preço Real"
+            name={t.common.real_price}
           />
           <Area
             type="monotone"
@@ -92,7 +94,7 @@ const StockChart = ({ chartData }: StockChartProps) => {
             strokeDasharray="5 5"
             fillOpacity={1}
             fill="url(#colorPredicted)"
-            name="Previsão IA"
+            name={t.common.ai_forecast}
           />
         </AreaChart>
       </ResponsiveContainer>

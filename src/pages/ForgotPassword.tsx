@@ -4,9 +4,11 @@ import { Activity, Mail, ArrowRight, ArrowLeft } from "lucide-react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { usePageTitle } from "@/hooks/usePageTitle";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 const ForgotPassword = () => {
-  usePageTitle("Recuperar Senha");
+  usePageTitle("Forgot Password");
+  const { t } = useLanguage();
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
@@ -49,9 +51,9 @@ const ForgotPassword = () => {
               Apex<span className="text-primary">Predict</span>
             </span>
           </div>
-          <h1 className="text-2xl font-bold text-foreground">Recuperar senha</h1>
+          <h1 className="text-2xl font-bold text-foreground">{t.forgot.title}</h1>
           <p className="text-sm text-muted-foreground mt-1 text-center">
-            Envia-mos um link para redefinir a tua senha
+            {t.forgot.desc}
           </p>
         </div>
 
@@ -61,27 +63,27 @@ const ForgotPassword = () => {
               <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-primary/10">
                 <Mail className="h-6 w-6 text-primary" />
               </div>
-              <p className="text-sm text-foreground font-medium">Email enviado!</p>
+              <p className="text-sm text-foreground font-medium">{t.forgot.sent_title}</p>
               <p className="text-sm text-muted-foreground">
-                Verifica a tua caixa de entrada em <span className="text-primary">{email}</span> e clica no link para redefinir a senha.
+                {t.forgot.sent_desc.split("{email}")[0]}<span className="text-primary">{email}</span>{t.forgot.sent_desc.split("{email}")[1]}
               </p>
               <Link
                 to="/login"
                 className="mt-4 inline-flex items-center gap-2 text-sm text-primary hover:underline"
               >
                 <ArrowLeft className="h-4 w-4" />
-                Voltar ao login
+                {t.forgot.back_login}
               </Link>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-5">
               <div>
-                <label className="block text-sm font-medium text-foreground mb-2">Email</label>
+                <label className="block text-sm font-medium text-foreground mb-2">{t.forgot.lbl_email}</label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <input
                     type="email"
-                    placeholder="seu@email.com"
+                    placeholder={t.forgot.ph_email}
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
@@ -97,14 +99,14 @@ const ForgotPassword = () => {
                 disabled={loading}
                 className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-6 py-3 font-semibold text-primary-foreground hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50"
               >
-                {loading ? "A enviar…" : "Enviar link de recuperação"}
+                {loading ? t.forgot.btn_loading : t.forgot.btn_send}
                 <ArrowRight className="h-4 w-4" />
               </button>
 
               <p className="text-center">
                 <Link to="/login" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors">
                   <ArrowLeft className="h-3.5 w-3.5" />
-                  Voltar ao login
+                  {t.forgot.back_login}
                 </Link>
               </p>
             </form>

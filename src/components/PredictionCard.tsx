@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { TrendingUp, TrendingDown, ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
+import { useLanguage } from "@/contexts/LanguageContext";
 
 interface PredictionCardProps {
   symbol: string;
@@ -12,6 +13,7 @@ interface PredictionCardProps {
 }
 
 const PredictionCard = ({ symbol, name, price, change, delay = 0, loading = false }: PredictionCardProps) => {
+  const { t } = useLanguage();
   const isUp = (change ?? 0) >= 0;
 
   return (
@@ -52,7 +54,7 @@ const PredictionCard = ({ symbol, name, price, change, delay = 0, loading = fals
           to={`/forecast?ticker=${symbol}`}
           className="flex items-center justify-between text-xs font-medium text-muted-foreground hover:text-primary transition-colors group"
         >
-          <span>Gerar Previsão com IA</span>
+          <span>{t.common.generate_forecast}</span>
           <ArrowRight className="h-3.5 w-3.5 group-hover:translate-x-0.5 transition-transform" />
         </Link>
       </div>
