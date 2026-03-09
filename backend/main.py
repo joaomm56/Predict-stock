@@ -16,7 +16,7 @@ import yfinance as yf
 from prophet import Prophet
 from sklearn.metrics import r2_score, mean_absolute_error, mean_absolute_percentage_error
 
-stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "").strip()
 
 PRICE_IDS = {
     "pro":     "price_1T8rsURNJEKtZi6YDft6rnbu",
