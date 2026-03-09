@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Briefcase, Plus, Trash2, TrendingUp, TrendingDown } from "lucide-react";
+import { Briefcase, Plus, Trash2, TrendingUp, TrendingDown, Lock, RefreshCw } from "lucide-react";
+import { Link } from "react-router-dom";
 import Navbar from "@/components/Navbar";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
 import { getStockInfo } from "@/lib/api";
 import { usePageTitle } from "@/hooks/usePageTitle";
+import { usePlan } from "@/hooks/usePlan";
 
 interface Favorite {
   id: string;
@@ -17,11 +19,13 @@ interface Favorite {
 const Portfolio = () => {
   usePageTitle("Portfólio");
   const { user } = useAuth();
+  const { plan, limits } = usePlan();
   const [favorites, setFavorites] = useState<Favorite[]>([]);
   const [newTicker, setNewTicker] = useState("");
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
   const loadFavorites = async () => {
     if (!user) return;
@@ -48,6 +52,12 @@ const Portfolio = () => {
     setLoading(false);
   };
 
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await loadFavorites();
+    setRefreshing(false);
+  };
+
   useEffect(() => { loadFavorites(); }, [user]);
 
   const handleAdd = async (e: React.FormEvent) => {
@@ -57,6 +67,30 @@ const Portfolio = () => {
     setError(null);
 
     const ticker = newTicker.trim().toUpperCase();
+
+    // Check plan portfolio limit
+    if (limits.portfolioMax !== Infinity && favorites.length >= limits.portfolioMax) {
+      setError(`O plano Free permite no máximo ${limits.portfolioMax} ações. Faz upgrade para adicionar mais.`);
+      setAdding(false);
+      return;
+    }
+
+    // Check for duplicates
+    if (favorites.some((f) => f.ticker === ticker)) {
+      setError("Essa ação já está no teu portfólio.");
+      setAdding(false);
+      return;
+    }
+
+    // Validate ticker exists
+    try {
+      await getStockInfo(ticker);
+    } catch {
+      setError("Ticker não encontrado. Verifica o símbolo e tenta novamente.");
+      setAdding(false);
+      return;
+    }
+
     const { error: dbError } = await supabase
       .from("favorites")
       .insert({ user_id: user.id, ticker });
@@ -90,9 +124,48 @@ const Portfolio = () => {
             <Briefcase className="h-3.5 w-3.5 text-primary" />
             <span className="font-mono text-xs text-primary">O Meu Portfólio</span>
           </div>
-          <h1 className="text-3xl font-bold text-foreground">As Minhas <span className="text-primary">Ações</span></h1>
+          <div className="flex items-center justify-between gap-4">
+            <h1 className="text-3xl font-bold text-foreground">As Minhas <span className="text-primary">Ações</span></h1>
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing || loading}
+              className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm text-muted-foreground hover:text-primary hover:border-primary transition-colors disabled:opacity-40"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
+              Atualizar
+            </button>
+          </div>
           <p className="text-muted-foreground mt-1">Guarda os tickers que queres acompanhar.</p>
         </motion.div>
+
+        {/* Plan limit banner */}
+        {plan === "free" && !loading && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className={`flex items-center justify-between gap-3 rounded-xl border px-4 py-3 mb-6 ${
+              favorites.length > limits.portfolioMax
+                ? "border-destructive/40 bg-destructive/10"
+                : "border-border bg-secondary/50"
+            }`}
+          >
+            <div className="flex items-center gap-2 text-sm">
+              <Lock className={`h-3.5 w-3.5 flex-shrink-0 ${favorites.length > limits.portfolioMax ? "text-destructive" : "text-muted-foreground"}`} />
+              {favorites.length > limits.portfolioMax ? (
+                <span className="text-destructive">
+                  Tens <strong>{favorites.length}</strong> ações mas o plano Free só permite <strong>{limits.portfolioMax}</strong>. Remove {favorites.length - limits.portfolioMax} para ficares em conformidade.
+                </span>
+              ) : (
+                <span className="text-muted-foreground">
+                  Plano Free: <span className="text-foreground font-semibold">{favorites.length} / {limits.portfolioMax}</span> ações
+                </span>
+              )}
+            </div>
+            <Link to="/pricing" className="text-xs font-semibold text-primary hover:opacity-80 transition-opacity whitespace-nowrap">
+              Fazer upgrade
+            </Link>
+          </motion.div>
+        )}
 
         {/* Adicionar */}
         <motion.form
@@ -111,7 +184,7 @@ const Portfolio = () => {
           />
           <button
             type="submit"
-            disabled={adding || !newTicker.trim()}
+            disabled={adding || !newTicker.trim() || (limits.portfolioMax !== Infinity && favorites.length >= limits.portfolioMax)}
             className="flex items-center gap-2 rounded-lg bg-primary px-4 py-3 font-semibold text-sm text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40"
           >
             <Plus className="h-4 w-4" />

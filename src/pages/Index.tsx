@@ -2,6 +2,8 @@ import { motion } from "framer-motion";
 import { Brain, BarChart3, Shield, Cpu, ArrowRight, Activity } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { useEffect, useState } from "react";
+import { getStockInfo } from "@/lib/api";
 import heroBg from "@/assets/hero-bg.jpg";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import Navbar from "@/components/Navbar";
@@ -9,12 +11,20 @@ import StockChart from "@/components/StockChart";
 import PredictionCard from "@/components/PredictionCard";
 import FeatureCard from "@/components/FeatureCard";
 
-const predictions = [
-  { symbol: "AAPL", name: "Apple Inc.", price: "198.45", change: "+2.34%", prediction: "205.80", confidence: 87, isUp: true },
-  { symbol: "TSLA", name: "Tesla Inc.", price: "241.12", change: "-1.08%", prediction: "228.50", confidence: 72, isUp: false },
-  { symbol: "NVDA", name: "NVIDIA Corp.", price: "875.30", change: "+4.12%", prediction: "920.00", confidence: 91, isUp: true },
-  { symbol: "AMZN", name: "Amazon.com", price: "185.60", change: "+1.56%", prediction: "192.40", confidence: 83, isUp: true },
+const FEATURED = [
+  { symbol: "AAPL", name: "Apple Inc." },
+  { symbol: "TSLA", name: "Tesla Inc." },
+  { symbol: "NVDA", name: "NVIDIA Corp." },
+  { symbol: "AMZN", name: "Amazon.com" },
 ];
+
+interface StockCard {
+  symbol: string;
+  name: string;
+  price: string | null;
+  change: number | null;
+  loading: boolean;
+}
 
 const features = [
   { icon: Brain, title: "IA Preditiva Avançada", description: "Modelos de deep learning treinados com bilhões de pontos de dados para previsões de alta precisão." },
@@ -34,6 +44,40 @@ const Index = () => {
   usePageTitle();
   const { user } = useAuth();
   const navigate = useNavigate();
+
+  const [cards, setCards] = useState<StockCard[]>(
+    FEATURED.map((s) => ({ ...s, price: null, change: null, loading: true }))
+  );
+
+  useEffect(() => {
+    const CACHE_KEY = "index_cards_cache";
+    const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+    const cached = sessionStorage.getItem(CACHE_KEY);
+    if (cached) {
+      try {
+        const { data, ts } = JSON.parse(cached);
+        if (Date.now() - ts < CACHE_TTL) {
+          setCards(data);
+          return;
+        }
+      } catch { /* ignore */ }
+    }
+
+    Promise.all(
+      FEATURED.map(async ({ symbol, name }) => {
+        try {
+          const info = await getStockInfo(symbol);
+          return { symbol, name: info.name ?? name, price: info.price.toFixed(2), change: info.change, loading: false };
+        } catch {
+          return { symbol, name, price: null, change: null, loading: false };
+        }
+      })
+    ).then((results) => {
+      setCards(results);
+      sessionStorage.setItem(CACHE_KEY, JSON.stringify({ data: results, ts: Date.now() }));
+    });
+  }, []);
 
   return (
     <div className="min-h-screen bg-background">
@@ -154,8 +198,8 @@ const Index = () => {
           </motion.div>
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {predictions.map((p, i) => (
-              <PredictionCard key={p.symbol} {...p} delay={i * 0.1} />
+            {cards.map((c, i) => (
+              <PredictionCard key={c.symbol} {...c} delay={i * 0.1} />
             ))}
           </div>
         </div>

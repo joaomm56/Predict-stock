@@ -1,17 +1,18 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import {
-  Heart, Zap, TrendingUp, TrendingDown, BarChart2, Clock, ArrowLeft,
+  Heart, Zap, TrendingUp, TrendingDown, BarChart2, Clock, ArrowLeft, Lock,
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import {
-  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
+  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
 } from "recharts";
 import Navbar from "@/components/Navbar";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/contexts/AuthContext";
-import { getStockInfo } from "@/lib/api";
+import { getStockInfo, getHistory } from "@/lib/api";
 import { usePageTitle } from "@/hooks/usePageTitle";
+import { usePlan, getForecastUsage } from "@/hooks/usePlan";
 
 /* ── Types ──────────────────────────────────────────────────────────────── */
 interface FavItem {
@@ -23,17 +24,6 @@ interface FavItem {
   loading: boolean;
 }
 
-/* ── Mock history (until real history is persisted) ─────────────────────── */
-const ALL_HISTORY = [
-  { date: "01 Mar", ticker: "AAPL",  previsto: 195.00, real: 198.45, accuracy: 98.2, hit: true  },
-  { date: "28 Fev", ticker: "NVDA",  previsto: 860.00, real: 875.30, accuracy: 98.3, hit: true  },
-  { date: "25 Fev", ticker: "TSLA",  previsto: 250.00, real: 241.12, accuracy: 96.4, hit: false },
-  { date: "22 Fev", ticker: "AMZN",  previsto: 180.00, real: 185.60, accuracy: 97.0, hit: true  },
-  { date: "19 Fev", ticker: "AAPL",  previsto: 190.00, real: 192.30, accuracy: 98.8, hit: true  },
-  { date: "15 Fev", ticker: "GOOGL", previsto: 170.00, real: 175.20, accuracy: 97.0, hit: true  },
-  { date: "12 Fev", ticker: "MSFT",  previsto: 415.00, real: 420.50, accuracy: 98.7, hit: true  },
-  { date: "08 Fev", ticker: "TSLA",  previsto: 260.00, real: 248.80, accuracy: 95.5, hit: false },
-];
 
 /* ── Custom tooltip ─────────────────────────────────────────────────────── */
 const ChartTooltip = ({ active, payload, label }: any) => {
@@ -54,19 +44,54 @@ const ChartTooltip = ({ active, payload, label }: any) => {
 const Dashboard = () => {
   usePageTitle("Dashboard");
   const { user } = useAuth();
+  const { plan, limits } = usePlan();
   const navigate = useNavigate();
+
+  // Map plan chart history limit to yfinance period string
+  const historyPeriod = limits.chartHistoryDays <= 30 ? "1mo" : limits.chartHistoryDays <= 730 ? "2y" : "10y";
+
+  // Forecasts remaining today (for free plan)
+  const forecastsLeft = limits.forecastsPerDay === Infinity
+    ? Infinity
+    : Math.max(0, limits.forecastsPerDay - getForecastUsage().count);
   const [favs, setFavs]               = useState<FavItem[]>([]);
   const [favsLoading, setFavsLoading] = useState(true);
-  const [perfChart, setPerfChart]     = useState<{ mes: string; real: number; prev: number }[]>([]);
-  const [history, setHistory]         = useState<typeof ALL_HISTORY>([]);
+  const [perfChart, setPerfChart] = useState<{ mes: string; real: number }[]>([]);
+  const [perfTicker, setPerfTicker] = useState<string>("");
+  const [perfLoading, setPerfLoading] = useState(false);
+  interface ForecastRow {
+    id: string;
+    ticker: string;
+    horizon_days: number;
+    predicted_price: number;
+    last_price: number;
+    mape: number | null;
+    r2: number | null;
+    created_at: string;
+  }
+  const [history, setHistory] = useState<ForecastRow[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
 
   const firstName   = (user?.user_metadata?.full_name ?? user?.email ?? "").split(" ")[0];
   const avgAccuracy = history.length > 0
-    ? (history.reduce((s, h) => s + h.accuracy, 0) / history.length).toFixed(1)
+    ? (history.reduce((s, h) => s + Math.max(0, 100 - (h.mape ?? 100)), 0) / history.length).toFixed(1)
     : "—";
   const hitRate = history.length > 0
-    ? Math.round((history.filter((h) => h.hit).length / history.length) * 100)
+    ? Math.round((history.filter((h) => (h.r2 ?? 0) > 0).length / history.length) * 100)
     : "—";
+
+  const loadChart = async (ticker: string) => {
+    setPerfTicker(ticker);
+    setPerfLoading(true);
+    try {
+      const hist = await getHistory(ticker, historyPeriod);
+      setPerfChart(hist.dates.map((d, i) => ({ mes: d, real: hist.values[i] })));
+    } catch {
+      setPerfChart([]);
+    } finally {
+      setPerfLoading(false);
+    }
+  };
 
   /* Load favorites + live prices */
   useEffect(() => {
@@ -104,24 +129,27 @@ const Dashboard = () => {
 
       setFavs(enriched);
 
-      // Filter history to only show user's followed tickers
-      const favTickers = new Set(enriched.map((f) => f.ticker.toUpperCase()));
-      setHistory(ALL_HISTORY.filter((h) => favTickers.has(h.ticker.toUpperCase())));
-
-      // Build performance chart from first favorite's price as base
-      const base = enriched[0]?.price ?? 200;
-      const months = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
-      setPerfChart(
-        months.map((mes, i) => {
-          const real = +(base * (0.93 + i * 0.007 + Math.sin(i) * 0.01)).toFixed(2);
-          const prev = +(real * (0.99 + Math.random() * 0.02)).toFixed(2);
-          return { mes, real, prev };
-        })
-      );
+      if (enriched.length > 0) loadChart(enriched[0].ticker);
 
       setFavsLoading(false);
     };
 
+    load();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const load = async () => {
+      setHistoryLoading(true);
+      const { data } = await supabase
+        .from("forecasts")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(50);
+      setHistory(data ?? []);
+      setHistoryLoading(false);
+    };
     load();
   }, [user]);
 
@@ -155,7 +183,18 @@ const Dashboard = () => {
           <h1 className="text-3xl font-bold text-foreground">
             Meu <span className="text-primary">Dashboard</span>
           </h1>
-          <p className="text-muted-foreground mt-1">Bem-vindo, {firstName}</p>
+          <div className="flex items-center gap-3 mt-1 flex-wrap">
+            <p className="text-muted-foreground">Bem-vindo, {firstName}</p>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 border border-primary/20 px-2.5 py-0.5 text-xs font-semibold text-primary capitalize">
+              {plan}
+            </span>
+            {plan === "free" && (
+              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground font-mono">
+                <Zap className="h-3 w-3" />
+                {forecastsLeft === 0 ? "Limite de previsões atingido" : `${forecastsLeft}/${limits.forecastsPerDay} previsões hoje`}
+              </span>
+            )}
+          </div>
         </motion.div>
 
         {/* Stat cards */}
@@ -198,6 +237,16 @@ const Dashboard = () => {
                 <Link to="/portfolio" className="text-xs text-primary hover:underline">Ver tudo</Link>
               )}
             </div>
+
+            {!favsLoading && plan === "free" && favs.length > limits.portfolioMax && (
+              <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 mb-4">
+                <Lock className="h-3.5 w-3.5 text-destructive flex-shrink-0" />
+                <p className="text-xs text-destructive flex-1">
+                  Tens {favs.length} ações — limite Free é {limits.portfolioMax}.
+                </p>
+                <Link to="/portfolio" className="text-xs font-semibold text-primary whitespace-nowrap">Gerir</Link>
+              </div>
+            )}
 
             {favsLoading ? (
               <div className="space-y-3">
@@ -262,10 +311,28 @@ const Dashboard = () => {
             transition={{ duration: 0.5, delay: 0.25 }}
             className="glass rounded-2xl p-6"
           >
-            <div className="flex items-center gap-2 mb-5">
+            <div className="flex items-center gap-2 mb-3">
               <BarChart2 className="h-4 w-4 text-primary" />
-              <h2 className="font-semibold text-foreground">Performance Geral</h2>
+              <h2 className="font-semibold text-foreground">Evolução do Portfólio</h2>
+              {perfLoading && <span className="text-xs text-muted-foreground font-mono animate-pulse">a carregar…</span>}
             </div>
+            {favs.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-4">
+                {favs.map((f) => (
+                  <button
+                    key={f.ticker}
+                    onClick={() => loadChart(f.ticker)}
+                    className={`rounded-lg px-2.5 py-1 font-mono text-xs font-semibold transition-colors ${
+                      perfTicker === f.ticker
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-secondary text-muted-foreground hover:text-primary hover:border-primary border border-border"
+                    }`}
+                  >
+                    {f.ticker}
+                  </button>
+                ))}
+              </div>
+            )}
             {perfChart.length > 0 ? (
               <ResponsiveContainer width="100%" height={220}>
                 <AreaChart data={perfChart} margin={{ top: 4, right: 4, bottom: 0, left: -20 }}>
@@ -274,20 +341,11 @@ const Dashboard = () => {
                       <stop offset="5%"  stopColor="hsl(175 80% 50%)" stopOpacity={0.3} />
                       <stop offset="95%" stopColor="hsl(175 80% 50%)" stopOpacity={0}   />
                     </linearGradient>
-                    <linearGradient id="gradPrev" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="hsl(160 70% 45%)" stopOpacity={0.15} />
-                      <stop offset="95%" stopColor="hsl(160 70% 45%)" stopOpacity={0}    />
-                    </linearGradient>
                   </defs>
                   <XAxis dataKey="mes" tick={{ fontSize: 10, fill: "hsl(220 10% 50%)" }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fontSize: 10, fill: "hsl(220 10% 50%)" }} axisLine={false} tickLine={false} domain={["auto", "auto"]} />
                   <Tooltip content={<ChartTooltip />} />
-                  <Legend
-                    formatter={(v) => <span className="text-xs text-muted-foreground">{v === "real" ? "Preço Real" : "Previsão IA"}</span>}
-                    wrapperStyle={{ paddingTop: 8 }}
-                  />
-                  <Area type="monotone" dataKey="real" stroke="hsl(175 80% 50%)" strokeWidth={2} fill="url(#gradReal)" dot={false} />
-                  <Area type="monotone" dataKey="prev" stroke="hsl(160 70% 45%)"  strokeWidth={2} fill="url(#gradPrev)" strokeDasharray="5 3" dot={false} />
+                  <Area type="monotone" dataKey="real" name="Preço Real" stroke="hsl(175 80% 50%)" strokeWidth={2} fill="url(#gradReal)" dot={false} />
                 </AreaChart>
               </ResponsiveContainer>
             ) : (
@@ -314,33 +372,52 @@ const Dashboard = () => {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-border">
-                  {["Data", "Ativo", "Previsto", "Real", "Precisão", "Status"].map((h) => (
+                  {["Data", "Ativo", "Preço Atual", "Previsão", "Horizonte", "Tendência", "Precisão"].map((h) => (
                     <th key={h} className="px-6 py-3 text-left text-xs font-mono text-muted-foreground">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {history.map((row, i) => (
-                  <tr key={i} className="hover:bg-secondary/20 transition-colors">
-                    <td className="px-6 py-4 text-sm text-muted-foreground font-mono">{row.date}</td>
-                    <td className="px-6 py-4">
-                      <span className="font-mono text-sm font-bold text-primary">{row.ticker}</span>
-                    </td>
-                    <td className="px-6 py-4 font-mono text-sm text-foreground">${row.previsto.toFixed(2)}</td>
-                    <td className="px-6 py-4 font-mono text-sm text-foreground">${row.real.toFixed(2)}</td>
-                    <td className="px-6 py-4 font-mono text-sm text-foreground">{row.accuracy}%</td>
-                    <td className="px-6 py-4">
-                      <div className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-semibold font-mono ${
-                        row.hit ? "bg-chart-up/10 text-chart-up" : "bg-destructive/10 text-destructive"
-                      }`}>
-                        {row.hit
-                          ? <><TrendingUp className="h-3 w-3" /> Acertou</>
-                          : <><TrendingDown className="h-3 w-3" /> Errou</>
-                        }
-                      </div>
+                {historyLoading ? (
+                  <tr>
+                    <td colSpan={7} className="px-6 py-10 text-center text-sm text-muted-foreground font-mono">
+                      A carregar…
                     </td>
                   </tr>
-                ))}
+                ) : history.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-6 py-10 text-center text-sm text-muted-foreground">
+                      Ainda não geraste nenhuma previsão.{" "}
+                      <Link to="/forecast" className="text-primary underline underline-offset-2">Gerar agora</Link>
+                    </td>
+                  </tr>
+                ) : history.map((row) => {
+                  const isUp = row.predicted_price >= row.last_price;
+                  const changePct = (((row.predicted_price - row.last_price) / row.last_price) * 100).toFixed(2);
+                  const accuracy = Math.max(0, 100 - (row.mape ?? 100)).toFixed(1);
+                  return (
+                    <tr key={row.id} className="hover:bg-secondary/20 transition-colors">
+                      <td className="px-6 py-4 text-sm text-muted-foreground font-mono">
+                        {new Date(row.created_at).toLocaleDateString("pt-PT")}
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className="font-mono text-sm font-bold text-primary">{row.ticker}</span>
+                      </td>
+                      <td className="px-6 py-4 font-mono text-sm text-foreground">${row.last_price.toFixed(2)}</td>
+                      <td className="px-6 py-4 font-mono text-sm text-foreground">${row.predicted_price.toFixed(2)}</td>
+                      <td className="px-6 py-4 font-mono text-sm text-muted-foreground">{row.horizon_days}d</td>
+                      <td className="px-6 py-4">
+                        <div className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-semibold font-mono ${
+                          isUp ? "bg-chart-up/10 text-chart-up" : "bg-destructive/10 text-destructive"
+                        }`}>
+                          {isUp ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                          {isUp ? "+" : ""}{changePct}%
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 font-mono text-sm text-foreground">{accuracy}%</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

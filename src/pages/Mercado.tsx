@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { BarChart3, TrendingUp, TrendingDown, RefreshCw } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { BarChart3, TrendingUp, TrendingDown, RefreshCw, Plus, Check } from "lucide-react";
+import { useNavigate, Link } from "react-router-dom";
 import Navbar from "@/components/Navbar";
 import { getStockInfo, type StockInfo } from "@/lib/api";
 import { usePageTitle } from "@/hooks/usePageTitle";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/lib/supabase";
+import { usePlan } from "@/hooks/usePlan";
 
 const INDEX_TICKERS = [
   { ticker: "^GSPC",  label: "S&P 500"   },
@@ -35,11 +38,44 @@ function formatPrice(price: number | null, currency = "USD"): string {
 
 const Mercado = () => {
   usePageTitle("Mercado");
+  const { user } = useAuth();
+  const { limits } = usePlan();
   const [indices, setIndices] = useState<MarketItem[]>([]);
   const [stocks, setStocks] = useState<MarketItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [addedTickers, setAddedTickers] = useState<Set<string>>(new Set());
+  const [limitReached, setLimitReached] = useState(false);
   const navigate = useNavigate();
+
+  const handleAddToPortfolio = async (e: React.MouseEvent, ticker: string) => {
+    e.stopPropagation();
+    if (!user) return;
+
+    // Check plan portfolio limit
+    if (limits.portfolioMax !== Infinity) {
+      const { count } = await supabase
+        .from("favorites")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id);
+      if ((count ?? 0) >= limits.portfolioMax) {
+        setLimitReached(true);
+        setTimeout(() => setLimitReached(false), 4000);
+        return;
+      }
+    }
+
+    const { data: existing } = await supabase
+      .from("favorites")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("ticker", ticker)
+      .maybeSingle();
+    if (!existing) {
+      await supabase.from("favorites").insert({ user_id: user.id, ticker });
+    }
+    setAddedTickers((prev) => new Set(prev).add(ticker));
+  };
 
   const fetchAll = async () => {
     setLoading(true);
@@ -144,6 +180,21 @@ const Mercado = () => {
         </div>
 
         {/* Tabela de ações */}
+        {limitReached && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3"
+          >
+            <p className="text-sm text-destructive font-mono">
+              Limite de {limits.portfolioMax} ações atingido no plano Free.
+            </p>
+            <Link to="/pricing" className="text-xs font-semibold text-primary hover:opacity-80 transition-opacity">
+              Fazer upgrade
+            </Link>
+          </motion.div>
+        )}
+
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -169,24 +220,38 @@ const Mercado = () => {
                     <p className="text-xs text-muted-foreground">{s.info?.name ?? "—"}</p>
                   </div>
                 </div>
-                <div className="text-right">
-                  {loading ? (
-                    <div className="space-y-1.5">
-                      <div className="h-4 w-20 rounded bg-secondary animate-pulse ml-auto" />
-                      <div className="h-3 w-14 rounded bg-secondary animate-pulse ml-auto" />
-                    </div>
-                  ) : s.error ? (
-                    <p className="text-xs text-destructive font-mono">Indisponível</p>
-                  ) : (
-                    <>
-                      <p className="font-mono text-sm font-semibold text-foreground">
-                        {formatPrice(s.info?.price ?? null, s.info?.currency)}
-                      </p>
-                      <div className={`flex items-center justify-end gap-1 text-xs font-mono ${(s.info?.change ?? 0) >= 0 ? "text-chart-up" : "text-chart-down"}`}>
-                        {(s.info?.change ?? 0) >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                        {formatChange(s.info?.change ?? null)}
+                <div className="flex items-center gap-4">
+                  <div className="text-right">
+                    {loading ? (
+                      <div className="space-y-1.5">
+                        <div className="h-4 w-20 rounded bg-secondary animate-pulse ml-auto" />
+                        <div className="h-3 w-14 rounded bg-secondary animate-pulse ml-auto" />
                       </div>
-                    </>
+                    ) : s.error ? (
+                      <p className="text-xs text-destructive font-mono">Indisponível</p>
+                    ) : (
+                      <>
+                        <p className="font-mono text-sm font-semibold text-foreground">
+                          {formatPrice(s.info?.price ?? null, s.info?.currency)}
+                        </p>
+                        <div className={`flex items-center justify-end gap-1 text-xs font-mono ${(s.info?.change ?? 0) >= 0 ? "text-chart-up" : "text-chart-down"}`}>
+                          {(s.info?.change ?? 0) >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                          {formatChange(s.info?.change ?? null)}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  {user && !loading && (
+                    <button
+                      onClick={(e) => handleAddToPortfolio(e, s.ticker)}
+                      className={`flex-shrink-0 h-8 w-8 rounded-lg border flex items-center justify-center transition-colors ${
+                        addedTickers.has(s.ticker)
+                          ? "border-primary/40 text-primary bg-primary/10"
+                          : "border-border text-muted-foreground hover:border-primary hover:text-primary"
+                      }`}
+                    >
+                      {addedTickers.has(s.ticker) ? <Check className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+                    </button>
                   )}
                 </div>
               </div>

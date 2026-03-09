@@ -1,17 +1,24 @@
 import { motion } from "framer-motion";
-import { Activity, Search, BarChart3, TrendingUp, TrendingDown, Zap } from "lucide-react";
+import { Activity, Search, BarChart3, TrendingUp, TrendingDown, Zap, Briefcase, CheckCircle } from "lucide-react";
 import { useState } from "react";
 import Navbar from "@/components/Navbar";
 import { getStockInfo, type StockInfo } from "@/lib/api";
 import { Link } from "react-router-dom";
 import { usePageTitle } from "@/hooks/usePageTitle";
+import { useAuth } from "@/contexts/AuthContext";
+import { supabase } from "@/lib/supabase";
+import { usePlan } from "@/hooks/usePlan";
 
 const Analise = () => {
   usePageTitle("Análise");
+  const { user } = useAuth();
+  const { limits } = usePlan();
   const [ticker, setTicker] = useState("");
   const [info, setInfo] = useState<StockInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [addingPortfolio, setAddingPortfolio] = useState(false);
+  const [portfolioMsg, setPortfolioMsg] = useState<string | null>(null);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,6 +34,42 @@ const Analise = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleAddToPortfolio = async () => {
+    if (!user || !ticker.trim()) return;
+    setAddingPortfolio(true);
+    setPortfolioMsg(null);
+
+    const t = ticker.trim().toUpperCase();
+
+    // Check plan portfolio limit
+    if (limits.portfolioMax !== Infinity) {
+      const { count } = await supabase
+        .from("favorites")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", user.id);
+      if ((count ?? 0) >= limits.portfolioMax) {
+        setPortfolioMsg(`Limite de ${limits.portfolioMax} ações atingido. Faz upgrade.`);
+        setAddingPortfolio(false);
+        return;
+      }
+    }
+
+    const { data: existing } = await supabase
+      .from("favorites")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("ticker", t)
+      .maybeSingle();
+
+    if (existing) {
+      setPortfolioMsg("Já está no teu portfólio.");
+    } else {
+      const { error } = await supabase.from("favorites").insert({ user_id: user.id, ticker: t });
+      setPortfolioMsg(error ? error.message : "Adicionado ao portfólio!");
+    }
+    setAddingPortfolio(false);
   };
 
   const isUp = info?.change != null ? info.change >= 0 : true;
@@ -116,13 +159,28 @@ const Analise = () => {
               ))}
             </div>
 
-            <Link
-              to={`/forecast?ticker=${ticker.toUpperCase()}`}
-              className="flex items-center justify-center gap-2 w-full rounded-lg bg-primary px-6 py-3 font-semibold text-sm text-primary-foreground hover:opacity-90 transition-opacity"
-            >
-              <Zap className="h-4 w-4" />
-              Gerar Previsão com IA
-            </Link>
+            <div className="flex flex-col gap-2">
+              <Link
+                to={`/forecast?ticker=${ticker.toUpperCase()}`}
+                className="flex items-center justify-center gap-2 w-full rounded-lg bg-primary px-6 py-3 font-semibold text-sm text-primary-foreground hover:opacity-90 transition-opacity"
+              >
+                <Zap className="h-4 w-4" />
+                Gerar Previsão com IA
+              </Link>
+              {user && (
+                <button
+                  onClick={handleAddToPortfolio}
+                  disabled={addingPortfolio}
+                  className="flex items-center justify-center gap-2 w-full rounded-lg border border-border px-6 py-3 font-semibold text-sm text-foreground hover:border-primary hover:text-primary transition-colors disabled:opacity-50"
+                >
+                  {portfolioMsg ? (
+                    <><CheckCircle className="h-4 w-4" />{portfolioMsg}</>
+                  ) : (
+                    <><Briefcase className="h-4 w-4" />{addingPortfolio ? "A adicionar…" : "Adicionar ao Portfólio"}</>
+                  )}
+                </button>
+              )}
+            </div>
           </motion.div>
         )}
 

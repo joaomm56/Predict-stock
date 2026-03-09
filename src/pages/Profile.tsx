@@ -116,7 +116,7 @@ const Profile = () => {
                 <Shield className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                 <div>
                   <p className="text-xs text-muted-foreground">Plano</p>
-                  <p className="font-mono text-sm text-foreground">Free</p>
+                  <p className="font-mono text-sm text-foreground capitalize">{user?.user_metadata?.plan ?? "free"}</p>
                 </div>
               </div>
               {isGoogleUser && (

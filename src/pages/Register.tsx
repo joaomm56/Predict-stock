@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Activity, Mail, Lock, User, ArrowRight } from "lucide-react";
+import { Activity, Mail, Lock, User, ArrowRight, ArrowLeft } from "lucide-react";
 import { useNavigate, Link } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 import { usePageTitle } from "@/hooks/usePageTitle";
@@ -68,6 +68,10 @@ const Register = () => {
         className="w-full max-w-md"
       >
         <div className="flex flex-col items-center mb-8">
+          <Link to="/" className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-primary transition-colors mb-4 self-start">
+            <ArrowLeft className="h-4 w-4" />
+            Voltar ao início
+          </Link>
           <div className="flex items-center gap-2 mb-6">
             <Activity className="h-7 w-7 text-primary" />
             <span className="text-2xl font-bold tracking-tight text-foreground">

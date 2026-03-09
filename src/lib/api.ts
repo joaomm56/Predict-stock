@@ -81,9 +81,28 @@ export function getStockInfo(ticker: string) {
   return apiFetch<StockInfo>(`/info/${encodeURIComponent(ticker.toUpperCase())}`);
 }
 
+export function getHistory(ticker: string, period = "1y") {
+  return apiFetch<{ ticker: string; dates: string[]; values: number[] }>(
+    `/history/${encodeURIComponent(ticker.toUpperCase())}?period=${period}`
+  );
+}
+
 export function getForecast(req: ForecastRequest) {
   return apiFetch<ForecastResponse>("/forecast", {
     method: "POST",
     body: JSON.stringify({ forecast_days: 365, ...req }),
   });
+}
+
+export function createCheckoutSession(plan: string, user_id: string) {
+  return apiFetch<{ url: string }>("/create-checkout-session", {
+    method: "POST",
+    body: JSON.stringify({ plan, user_id }),
+  });
+}
+
+export function verifyCheckout(session_id: string) {
+  return apiFetch<{ plan: string; user_id: string }>(
+    `/verify-checkout?session_id=${encodeURIComponent(session_id)}`
+  );
 }

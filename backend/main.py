@@ -6,14 +6,20 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from datetime import date
 import traceback
+import os
+import stripe
 import pandas as pd
 import yfinance as yf
-import torch
-import torch.serialization
-from neuralprophet import NeuralProphet
+from prophet import Prophet
 from sklearn.metrics import r2_score, mean_absolute_error, mean_absolute_percentage_error
+
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
+
+PRICE_IDS = {
+    "pro":     "price_1T8rsURNJEKtZi6YDft6rnbu",
+    "premium": "price_1T8rsrRNJEKtZi6YYKE6RHVj",
+}
 
 app = FastAPI(title="Stock Forecast API")
 
@@ -28,7 +34,7 @@ app.add_middleware(
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     tb = traceback.format_exc()
-    print(tb)  # imprime no terminal do uvicorn
+    print(tb)
     return JSONResponse(
         status_code=500,
         content={"detail": str(exc), "traceback": tb},
@@ -44,12 +50,12 @@ class ForecastRequest(BaseModel):
     forecast_days: int = 365
 
 
+class CheckoutRequest(BaseModel):
+    plan: str
+    user_id: str
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
-def patch_torch():
-    orig = torch.serialization.load
-    torch.load = lambda *a, **kw: orig(*a, **kw, weights_only=False)
-
-
 def fetch_stock(ticker: str, start: str, end: str):
     tk   = yf.Ticker(ticker)
     info = tk.info
@@ -102,6 +108,27 @@ def stock_info(ticker: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.get("/history/{ticker}")
+def history(ticker: str, period: str = "1y"):
+    """Monthly closing price history for a ticker."""
+    try:
+        tk = yf.Ticker(ticker.upper())
+        hist = tk.history(period=period)
+        if hist.empty:
+            raise HTTPException(status_code=404, detail=f"No data for '{ticker}'.")
+        hist.index = hist.index.tz_localize(None)
+        monthly = hist["Close"].resample("ME").last().dropna()
+        return {
+            "ticker": ticker.upper(),
+            "dates": monthly.index.strftime("%b %Y").tolist(),
+            "values": [round(v, 2) for v in monthly.tolist()],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.post("/forecast")
 def forecast(req: ForecastRequest):
     ticker = req.ticker.upper()
@@ -110,34 +137,41 @@ def forecast(req: ForecastRequest):
         # 1. Fetch data
         data, ohlcv, meta = fetch_stock(ticker, req.start, req.end)
 
-        # 2. Train model
-        patch_torch()
-        model = NeuralProphet()
-        model.fit(data, freq="B")
+        if len(data) < 30:
+            raise HTTPException(status_code=400, detail="Dados insuficientes. Escolhe um intervalo maior.")
 
-        # 3. Forecast
-        future_df = model.make_future_dataframe(data, periods=req.forecast_days)
-        ff = model.predict(future_df)
-        fh = model.predict(data)
+        # 2. Train Prophet model
+        model = Prophet(
+            daily_seasonality=False,
+            weekly_seasonality=True,
+            yearly_seasonality=True,
+            changepoint_prior_scale=0.1,
+        )
+        model.fit(data)
 
-        # 4. Separate future-only rows
-        future_only = ff.tail(req.forecast_days).copy().reset_index(drop=True)
+        # 3. Historical predictions (for chart overlay and metrics)
+        hist_forecast = model.predict(data[["ds"]])
+
+        # 4. Future forecast
+        future_df = model.make_future_dataframe(periods=req.forecast_days, freq="B")
+        full_forecast = model.predict(future_df)
+        future_only = full_forecast[full_forecast["ds"] > data["ds"].max()].head(req.forecast_days).reset_index(drop=True)
 
         # 5. Metrics
-        y_true = fh["y"].dropna()
-        y_pred = fh["yhat1"][y_true.index]
+        y_true = data["y"].values
+        y_pred = hist_forecast["yhat"].values
 
         r2   = float(r2_score(y_true, y_pred))
         mae  = float(mean_absolute_error(y_true, y_pred))
         mape = float(mean_absolute_percentage_error(y_true, y_pred) * 100)
 
         last_price = float(data["y"].iloc[-1])
-        end_price  = float(future_only["yhat1"].iloc[-1])
+        end_price  = float(future_only["yhat"].iloc[-1])
 
-        def to_series(df, col):
+        def to_series(df, date_col, val_col):
             return {
-                "dates":  df["ds"].dt.strftime("%Y-%m-%d").tolist(),
-                "values": df[col].round(4).tolist(),
+                "dates":  df[date_col].dt.strftime("%Y-%m-%d").tolist(),
+                "values": df[val_col].round(4).tolist(),
             }
 
         return {
@@ -146,9 +180,9 @@ def forecast(req: ForecastRequest):
             "last_price": last_price,
             "metrics": {"r2": round(r2, 4), "mae": round(mae, 4), "mape": round(mape, 4)},
             "forecast_end_price": round(end_price, 2),
-            "real":           to_series(data, "y"),
-            "historic_pred":  to_series(fh,   "yhat1"),
-            "future_pred":    to_series(future_only, "yhat1"),
+            "real":          to_series(data, "ds", "y"),
+            "historic_pred": to_series(hist_forecast, "ds", "yhat"),
+            "future_pred":   to_series(future_only, "ds", "yhat"),
             "ohlcv": {
                 "dates":  ohlcv["ds"].dt.strftime("%Y-%m-%d").tolist(),
                 "open":   ohlcv["open"].round(4).tolist(),
@@ -164,4 +198,42 @@ def forecast(req: ForecastRequest):
         tb = traceback.format_exc()
         print(tb)
         raise HTTPException(status_code=500, detail=f"{type(exc).__name__}: {exc}")
-    #just to commit
+
+
+@app.post("/create-checkout-session")
+def create_checkout_session(req: CheckoutRequest):
+    price_id = PRICE_IDS.get(req.plan)
+    if not price_id:
+        raise HTTPException(status_code=400, detail="Plano inválido.")
+    if not stripe.api_key:
+        raise HTTPException(status_code=500, detail="Stripe não configurado.")
+
+    origin = os.getenv("FRONTEND_URL", "http://localhost:5173")
+    try:
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=[{"price": price_id, "quantity": 1}],
+            mode="subscription",
+            success_url=f"{origin}/pricing?success=true&session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{origin}/pricing?cancelled=true",
+            client_reference_id=req.user_id,
+            metadata={"plan": req.plan, "user_id": req.user_id},
+        )
+        return {"url": session.url}
+    except stripe.StripeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/verify-checkout")
+def verify_checkout(session_id: str):
+    if not stripe.api_key:
+        raise HTTPException(status_code=500, detail="Stripe não configurado.")
+    try:
+        session = stripe.checkout.Session.retrieve(session_id)
+        if session.status != "complete":
+            raise HTTPException(status_code=400, detail="Pagamento não concluído.")
+        plan = session.metadata.get("plan")
+        user_id = session.metadata.get("user_id")
+        return {"plan": plan, "user_id": user_id}
+    except stripe.StripeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
