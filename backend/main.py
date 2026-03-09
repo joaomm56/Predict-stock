@@ -8,6 +8,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import traceback
 import os
+from dotenv import load_dotenv
+load_dotenv()
 import stripe
 import pandas as pd
 import yfinance as yf
