@@ -189,9 +189,9 @@ const Register = () => {
 
             <p className="text-xs text-muted-foreground text-center leading-relaxed">
               {t.register.terms}{" "}
-              <a href="#" className="text-primary hover:underline">{t.register.terms_link}</a>{" "}
+              <Link to="/terms" className="text-primary hover:underline">{t.register.terms_link}</Link>{" "}
               {t.register.and}{" "}
-              <a href="#" className="text-primary hover:underline">{t.register.privacy_link}</a>.
+              <Link to="/privacy" className="text-primary hover:underline">{t.register.privacy_link}</Link>.
             </p>
 
             <button
