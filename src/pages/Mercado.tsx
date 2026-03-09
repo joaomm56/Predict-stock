@@ -52,8 +52,19 @@ const Mercado = () => {
   const [addedTickers, setAddedTickers] = useState<Set<string>>(new Set());
   const [limitReached, setLimitReached] = useState(false);
 
+  const PERIODS = [
+    { label: "1M", value: "1mo" },
+    { label: "3M", value: "3mo" },
+    { label: "6M", value: "6mo" },
+    { label: "1A", value: "1y" },
+    { label: "2A", value: "2y" },
+    { label: "5A", value: "5y" },
+    { label: "Máx", value: "max" },
+  ];
+
   // Expanded panel
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
+  const [selectedPeriod, setSelectedPeriod] = useState("1y");
   const [chartData, setChartData] = useState<ChartPoint[]>([]);
   const [chartLoading, setChartLoading] = useState(false);
   const [livePrice, setLivePrice] = useState<StockInfo | null>(null);
@@ -105,11 +116,11 @@ const Mercado = () => {
     setLoading(false);
   };
 
-  const loadTickerData = async (ticker: string) => {
+  const loadTickerData = async (ticker: string, period: string) => {
     setChartLoading(true);
     try {
       const [hist, info] = await Promise.all([
-        getHistory(ticker, "1y"),
+        getHistory(ticker, period),
         getStockInfo(ticker),
       ]);
       setChartData(hist.dates.map((d, i) => ({ date: d, price: hist.values[i] })));
@@ -118,6 +129,12 @@ const Mercado = () => {
       setChartData([]);
     }
     setChartLoading(false);
+  };
+
+  const handlePeriodChange = (period: string) => {
+    if (!selectedTicker) return;
+    setSelectedPeriod(period);
+    loadTickerData(selectedTicker, period);
   };
 
   const refreshLivePrice = async (ticker: string) => {
@@ -136,7 +153,8 @@ const Mercado = () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     } else {
       setSelectedTicker(ticker);
-      loadTickerData(ticker);
+      setSelectedPeriod("1y");
+      loadTickerData(ticker, "1y");
       if (intervalRef.current) clearInterval(intervalRef.current);
       intervalRef.current = setInterval(() => refreshLivePrice(ticker), 30_000);
     }
@@ -323,20 +341,38 @@ const Mercado = () => {
                     >
                       <div className="px-6 py-5">
                         {/* Header */}
-                        <div className="flex items-center justify-between mb-4">
-                          <div>
-                            <span className="font-mono text-sm font-bold text-primary">{s.ticker}</span>
-                            <span className="ml-2 text-xs text-muted-foreground">{livePrice?.name ?? s.info?.name}</span>
+                        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+                          <div className="flex items-center gap-3">
+                            <div>
+                              <span className="font-mono text-sm font-bold text-primary">{s.ticker}</span>
+                              <span className="ml-2 text-xs text-muted-foreground">{livePrice?.name ?? s.info?.name}</span>
+                            </div>
                             {livePrice && (
-                              <span className="ml-3 font-mono text-lg font-bold text-foreground">
+                              <span className="font-mono text-lg font-bold text-foreground">
                                 {formatPrice(livePrice.price, livePrice.currency)}
                               </span>
                             )}
                           </div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {/* Period selector */}
+                            <div className="flex items-center gap-1 rounded-lg border border-border p-0.5">
+                              {PERIODS.map((p) => (
+                                <button
+                                  key={p.value}
+                                  onClick={(e) => { e.stopPropagation(); handlePeriodChange(p.value); }}
+                                  className={`px-2.5 py-1 rounded-md text-xs font-mono font-medium transition-colors ${
+                                    selectedPeriod === p.value
+                                      ? "bg-primary text-primary-foreground"
+                                      : "text-muted-foreground hover:text-foreground"
+                                  }`}
+                                >
+                                  {p.label}
+                                </button>
+                              ))}
+                            </div>
                             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                               <span className="h-1.5 w-1.5 rounded-full bg-chart-up animate-pulse" />
-                              Atualiza a cada 30s
+                              Ao vivo
                             </div>
                             <button
                               onClick={(e) => { e.stopPropagation(); handleRowClick(s.ticker); }}

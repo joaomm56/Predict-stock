@@ -112,18 +112,31 @@ def stock_info(ticker: str):
 
 @app.get("/history/{ticker}")
 def history(ticker: str, period: str = "1y"):
-    """Monthly closing price history for a ticker."""
+    """Closing price history for a ticker. Granularity auto-selected by period."""
     try:
         tk = yf.Ticker(ticker.upper())
         hist = tk.history(period=period)
         if hist.empty:
             raise HTTPException(status_code=404, detail=f"No data for '{ticker}'.")
         hist.index = hist.index.tz_localize(None)
-        monthly = hist["Close"].resample("ME").last().dropna()
+
+        if period in ("1mo", "3mo"):
+            series = hist["Close"].resample("W").last().dropna()
+            fmt = "%d %b"
+        elif period in ("6mo",):
+            series = hist["Close"].resample("W").last().dropna()
+            fmt = "%d %b"
+        elif period in ("1y", "2y"):
+            series = hist["Close"].resample("ME").last().dropna()
+            fmt = "%b %Y"
+        else:  # 5y, 10y, ytd, max
+            series = hist["Close"].resample("ME").last().dropna()
+            fmt = "%b %Y"
+
         return {
             "ticker": ticker.upper(),
-            "dates": monthly.index.strftime("%b %Y").tolist(),
-            "values": [round(v, 2) for v in monthly.tolist()],
+            "dates": series.index.strftime(fmt).tolist(),
+            "values": [round(v, 2) for v in series.tolist()],
         }
     except HTTPException:
         raise
