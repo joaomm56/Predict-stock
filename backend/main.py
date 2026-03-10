@@ -6,14 +6,23 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 import traceback
 import os
+import threading
+from datetime import datetime
 from dotenv import load_dotenv
 load_dotenv()
+import sentry_sdk
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.starlette import StarletteIntegration
 import stripe
 import numpy as np
 import pandas as pd
 import yfinance as yf
+from cachetools import TTLCache, cached
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.metrics import r2_score, mean_absolute_error, mean_absolute_percentage_error
 
@@ -24,12 +33,49 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173").strip()
 
+_sentry_dsn = os.getenv("SENTRY_DSN", "").strip()
+if _sentry_dsn:
+    sentry_sdk.init(
+        dsn=_sentry_dsn,
+        integrations=[StarletteIntegration(), FastApiIntegration()],
+        traces_sample_rate=0.1,
+    )
+
+# ── yfinance cache ─────────────────────────────────────────────────────────────
+_info_lock  = threading.Lock()
+_hist_lock  = threading.Lock()
+_stock_lock = threading.Lock()
+
+_info_cache  = TTLCache(maxsize=256, ttl=300)   # 5 min — ticker metadata + price
+_hist_cache  = TTLCache(maxsize=128, ttl=600)   # 10 min — period history
+_stock_cache = TTLCache(maxsize=64,  ttl=300)   # 5 min — forecast raw data
+
+
+@cached(_info_cache, lock=_info_lock)
+def _cached_ticker_info(ticker: str) -> dict:
+    return yf.Ticker(ticker).info
+
+
+@cached(_hist_cache, lock=_hist_lock)
+def _cached_ticker_history(ticker: str, period: str):
+    return yf.Ticker(ticker).history(period=period).copy()
+
+
+@cached(_stock_cache, lock=_stock_lock)
+def _cached_stock_fetch(ticker: str, start: str, end: str):
+    tk = yf.Ticker(ticker)
+    return tk.history(start=start, end=end).copy(), tk.info
+
 PRICE_IDS = {
     "pro":     "price_1T8rsURNJEKtZi6YDft6rnbu",
     "premium": "price_1T8rsrRNJEKtZi6YYKE6RHVj",
 }
 
+limiter = Limiter(key_func=get_remote_address)
+
 app = FastAPI(title="Stock Forecast API")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -41,13 +87,59 @@ app.add_middleware(
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    tb = traceback.format_exc()
-    print(tb)
+    print(traceback.format_exc())  # logs only on server
     return JSONResponse(
         status_code=500,
-        content={"detail": str(exc), "traceback": tb},
+        content={"detail": "Internal server error."},
         headers={"Access-Control-Allow-Origin": FRONTEND_URL},
     )
+
+
+# ── Quota enforcement ─────────────────────────────────────────────────────────
+FREE_FORECASTS_PER_DAY = 5
+
+
+def check_and_increment_quota(token: str) -> None:
+    """Validates user JWT and enforces daily quota for free-plan users.
+    Raises HTTPException 429 if the limit is reached.
+    Fails open (no error) if Supabase is unavailable — rate limiting covers abuse.
+    """
+    if not token or not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        return
+
+    try:
+        from supabase import create_client
+        sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+        user_resp = sb.auth.get_user(token)
+        user = user_resp.user
+        if not user:
+            return
+
+        meta = user.user_metadata or {}
+        plan = meta.get("plan", "free")
+
+        if plan != "free":
+            return  # paid plans have no daily limit
+
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        quota_date = meta.get("quota_date", "")
+        quota_count = int(meta.get("quota_count", 0)) if quota_date == today else 0
+
+        if quota_count >= FREE_FORECASTS_PER_DAY:
+            raise HTTPException(
+                status_code=429,
+                detail=f"Daily forecast limit reached ({FREE_FORECASTS_PER_DAY}/day). Upgrade to Pro for unlimited forecasts."
+            )
+
+        sb.auth.admin.update_user_by_id(user.id, {
+            "user_metadata": {**meta, "quota_date": today, "quota_count": quota_count + 1}
+        })
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Quota check error: {e}")  # fail open
 
 
 # ── Models ────────────────────────────────────────────────────────────────────
@@ -156,9 +248,7 @@ def _recursive_forecast(model: GradientBoostingRegressor,
 
 # ── Stock data helper ──────────────────────────────────────────────────────────
 def fetch_stock(ticker: str, start: str, end: str):
-    tk   = yf.Ticker(ticker)
-    info = tk.info
-    hist = tk.history(start=start, end=end)
+    hist, info = _cached_stock_fetch(ticker, start, end)
 
     if hist.empty:
         raise HTTPException(status_code=404, detail=f"No data found for ticker '{ticker}'.")
@@ -188,11 +278,11 @@ def health():
 
 
 @app.get("/info/{ticker}")
-def stock_info(ticker: str):
+@limiter.limit("60/minute")
+def stock_info(request: Request, ticker: str):
     """Quick ticker info without running the model."""
     try:
-        tk   = yf.Ticker(ticker.upper())
-        info = tk.info
+        info = _cached_ticker_info(ticker.upper())
         if not info.get("shortName"):
             raise HTTPException(status_code=404, detail=f"Ticker '{ticker}' not found.")
         return {
@@ -208,13 +298,14 @@ def stock_info(ticker: str):
 
 
 @app.get("/history/{ticker}")
-def history(ticker: str, period: str = "1y"):
+@limiter.limit("60/minute")
+def history(request: Request, ticker: str, period: str = "1y"):
     """Closing price history for a ticker. Granularity auto-selected by period."""
     try:
-        tk = yf.Ticker(ticker.upper())
-        hist = tk.history(period=period)
+        hist = _cached_ticker_history(ticker.upper(), period)
         if hist.empty:
             raise HTTPException(status_code=404, detail=f"No data for '{ticker}'.")
+        hist = hist.copy()
         hist.index = hist.index.tz_localize(None)
 
         if period in ("1mo", "3mo"):
@@ -242,8 +333,13 @@ def history(ticker: str, period: str = "1y"):
 
 
 @app.post("/forecast")
-def forecast(req: ForecastRequest):
+@limiter.limit("10/minute")
+def forecast(request: Request, req: ForecastRequest):
     ticker = req.ticker.upper()
+
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        check_and_increment_quota(auth_header[7:])
 
     try:
         # Always fetch at least 130 calendar days so GBM has enough lag history.
@@ -336,11 +432,11 @@ def forecast(req: ForecastRequest):
 
 
 @app.get("/indicators/{ticker}")
-def indicators(ticker: str, period: str = "1y"):
+@limiter.limit("60/minute")
+def indicators(request: Request, ticker: str, period: str = "1y"):
     """RSI, MACD and Bollinger Bands for a ticker."""
     try:
-        tk = yf.Ticker(ticker.upper())
-        hist = tk.history(period=period)
+        hist = _cached_ticker_history(ticker.upper(), period)
         if hist.empty:
             raise HTTPException(status_code=404, detail=f"No data for '{ticker}'.")
 
@@ -440,14 +536,38 @@ async def stripe_webhook(request: Request):
     except stripe.SignatureVerificationError:
         raise HTTPException(status_code=400, detail="Invalid signature.")
 
-    if event["type"] == "checkout.session.completed":
+    event_id   = event["id"]
+    event_type = event["type"]
+
+    if not (SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY):
+        raise HTTPException(status_code=500, detail="Supabase not configured.")
+
+    from supabase import create_client
+    sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+    # Idempotência — ignora eventos já processados
+    existing = sb.table("webhook_events").select("event_id").eq("event_id", event_id).eq("status", "processed").execute()
+    if existing.data:
+        return {"received": True, "duplicate": True}
+
+    if event_type == "checkout.session.completed":
         session = event["data"]["object"]
         user_id = session.get("metadata", {}).get("user_id")
-        plan = session.get("metadata", {}).get("plan")
+        plan    = session.get("metadata", {}).get("plan")
 
-        if user_id and plan and SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY:
-            from supabase import create_client
-            sb = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-            sb.auth.admin.update_user_by_id(user_id, {"user_metadata": {"plan": plan}})
+        if user_id and plan:
+            try:
+                sb.auth.admin.update_user_by_id(user_id, {"user_metadata": {"plan": plan}})
+                sb.table("webhook_events").insert({
+                    "event_id": event_id, "event_type": event_type,
+                    "user_id": user_id, "plan": plan, "status": "processed"
+                }).execute()
+            except Exception as e:
+                sb.table("webhook_events").insert({
+                    "event_id": event_id, "event_type": event_type,
+                    "user_id": user_id, "plan": plan,
+                    "status": "failed", "error": str(e)
+                }).execute()
+                raise HTTPException(status_code=500, detail="Failed to update user plan.")
 
     return {"received": True}

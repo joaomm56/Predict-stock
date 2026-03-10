@@ -1,5 +1,8 @@
 fastapi
 uvicorn[standard]
+slowapi
+cachetools
+sentry-sdk[fastapi]
 pandas
 yfinance
 scikit-learn

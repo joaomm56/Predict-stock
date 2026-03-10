@@ -102,7 +102,11 @@ const Forecast = () => {
     setChartData(undefined);
 
     try {
-      const data = await getForecast({ ticker: ticker.trim(), start, end: today, forecast_days: Math.min(days, limits.forecastDaysMax) });
+      const { data: { session } } = await supabase.auth.getSession();
+      const data = await getForecast(
+        { ticker: ticker.trim(), start, end: today, forecast_days: Math.min(days, limits.forecastDaysMax) },
+        session?.access_token
+      );
       incrementForecastUsage();
       setResult(data);
       setChartData(buildChartData(data, limits.chartHistoryDays));

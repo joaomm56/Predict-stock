@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Analytics } from "@vercel/analytics/react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
@@ -8,24 +9,25 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import BackendBanner from "@/components/BackendBanner";
-import Index from "./pages/Index";
-import Forecast from "./pages/Forecast";
-import Mercado from "./pages/Mercado";
-import Analise from "./pages/Analise";
-import Portfolio from "./pages/Portfolio";
-import Profile from "./pages/Profile";
-import Dashboard from "./pages/Dashboard";
-import Pricing from "./pages/Pricing";
-import Login from "./pages/Login";
-import Register from "./pages/Register";
-import ForgotPassword from "./pages/ForgotPassword";
-import ResetPassword from "./pages/ResetPassword";
-import Alertas from "./pages/Alertas";
-import Comparar from "./pages/Comparar";
-import Backtesting from "./pages/Backtesting";
-import Terms from "./pages/Terms";
-import Privacy from "./pages/Privacy";
-import NotFound from "./pages/NotFound";
+
+const Index        = lazy(() => import("./pages/Index"));
+const Forecast     = lazy(() => import("./pages/Forecast"));
+const Mercado      = lazy(() => import("./pages/Mercado"));
+const Analise      = lazy(() => import("./pages/Analise"));
+const Portfolio    = lazy(() => import("./pages/Portfolio"));
+const Profile      = lazy(() => import("./pages/Profile"));
+const Dashboard    = lazy(() => import("./pages/Dashboard"));
+const Pricing      = lazy(() => import("./pages/Pricing"));
+const Login        = lazy(() => import("./pages/Login"));
+const Register     = lazy(() => import("./pages/Register"));
+const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
+const ResetPassword  = lazy(() => import("./pages/ResetPassword"));
+const Alertas      = lazy(() => import("./pages/Alertas"));
+const Comparar     = lazy(() => import("./pages/Comparar"));
+const Backtesting  = lazy(() => import("./pages/Backtesting"));
+const Terms        = lazy(() => import("./pages/Terms"));
+const Privacy      = lazy(() => import("./pages/Privacy"));
+const NotFound     = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
 
@@ -39,6 +41,7 @@ const App = () => (
         <Sonner />
         <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <AuthProvider>
+            <Suspense fallback={<div className="min-h-screen bg-background" />}>
             <Routes>
               {/* Public */}
               <Route path="/" element={<Index />} />
@@ -63,6 +66,7 @@ const App = () => (
 
               <Route path="*" element={<NotFound />} />
             </Routes>
+            </Suspense>
           </AuthProvider>
         </BrowserRouter>
       </LanguageProvider>

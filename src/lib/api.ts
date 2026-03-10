@@ -87,11 +87,22 @@ export function getHistory(ticker: string, period = "1y") {
   );
 }
 
-export function getForecast(req: ForecastRequest) {
-  return apiFetch<ForecastResponse>("/forecast", {
+export async function getForecast(req: ForecastRequest, token?: string) {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(`${BASE_URL}/forecast`, {
     method: "POST",
+    headers,
     body: JSON.stringify({ forecast_days: 365, ...req }),
   });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail ?? `HTTP ${res.status}`);
+  }
+
+  return res.json() as Promise<ForecastResponse>;
 }
 
 export interface IndicatorsResponse {
