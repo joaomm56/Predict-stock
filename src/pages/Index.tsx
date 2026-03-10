@@ -254,6 +254,43 @@ const Index = () => {
         </div>
       </section>}
 
+      {/* SEO Content */}
+      <section className="py-20 border-t border-border">
+        <div className="container mx-auto px-6 max-w-4xl">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+          >
+            <h2 className="text-2xl md:text-3xl font-bold text-foreground mb-4">
+              {t.index.seo_what_title} <span className="text-primary">{t.index.seo_what_hl}</span>?
+            </h2>
+            <p className="text-muted-foreground leading-relaxed mb-8">
+              {t.index.seo_what_body}
+            </p>
+
+            <h2 className="text-2xl md:text-3xl font-bold text-foreground mb-4">
+              {t.index.seo_how_title} <span className="text-primary">{t.index.seo_how_hl}</span>
+            </h2>
+            <p className="text-muted-foreground leading-relaxed mb-4">{t.index.seo_how_body1}</p>
+            <p className="text-muted-foreground leading-relaxed mb-8">{t.index.seo_how_body2}</p>
+
+            <h2 className="text-2xl md:text-3xl font-bold text-foreground mb-6">
+              {t.index.seo_faq_title} <span className="text-primary">{t.index.seo_faq_hl}</span>
+            </h2>
+
+            <div className="space-y-6">
+              {t.index.seo_faq.map(({ q, a }) => (
+                <div key={q} className="border border-border rounded-lg p-5">
+                  <h3 className="font-semibold text-foreground mb-2">{q}</h3>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{a}</p>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        </div>
+      </section>
+
       {/* Footer */}
       <footer className="border-t border-border py-8">
         <div className="container mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4">

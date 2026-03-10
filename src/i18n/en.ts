@@ -75,6 +75,21 @@ const en = {
     cta_section_desc:  "Join thousands of investors already using AI to maximise their returns.",
     cta_register:      "Create Free Account",
     footer_copy:       "© 2026 ApexPredict. Forecasts do not constitute financial advice.",
+    seo_what_title:    "What is",
+    seo_what_hl:       "ApexPredict",
+    seo_what_body:     "ApexPredict is an AI-powered stock market forecasting platform. Using the Prophet model and advanced technical analysis, we generate price predictions for any publicly traded stock — including US stocks like AAPL, TSLA, NVDA, AMZN and MSFT, and Brazilian stocks like PETR4, VALE3, BBAS3 and ITUB4.",
+    seo_how_title:     "How does",
+    seo_how_hl:        "stock forecasting work?",
+    seo_how_body1:     "Our system collects historical price and volume data, computes technical indicators such as RSI, MACD, Moving Averages and Bollinger Bands, and trains a machine learning model to project future prices. The result is a chart showing the predicted trend for the coming days.",
+    seo_how_body2:     "You can also use backtesting to test buy/sell strategies against historical data, and compare multiple stocks side by side to make more informed investment decisions.",
+    seo_faq_title:     "Frequently asked",
+    seo_faq_hl:        "questions",
+    seo_faq: [
+      { q: "Is AI stock forecasting reliable?", a: "AI identifies historical patterns and trends, but no tool can predict the market with 100% accuracy. ApexPredict is a decision-support tool, not financial advice. Use the forecasts alongside your own analysis." },
+      { q: "Which stocks can I analyse?", a: "Any stock with a valid Yahoo Finance ticker — Brazilian (B3), US (NYSE, NASDAQ), European stocks and global indices. Just type the ticker, e.g. PETR4.SA for Brazilian stocks or AAPL for US stocks." },
+      { q: "What is backtesting?", a: "Backtesting lets you test an investment strategy against historical data. For example, 'if I had bought when RSI was below 30 and sold above 70, what would my return be?' — ApexPredict calculates this automatically." },
+      { q: "Is there a free plan?", a: "Yes. The free plan includes a limited number of forecasts per month. Paid plans offer unlimited forecasts, price alerts and access to all indicators." },
+    ],
   },
 
   // ── Dashboard ───────────────────────────────────────────────────────────────

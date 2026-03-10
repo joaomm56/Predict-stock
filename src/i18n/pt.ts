@@ -73,6 +73,21 @@ const pt: Translations = {
     cta_section_desc:  "Junte-se a milhares de investidores que já usam IA para maximizar seus retornos.",
     cta_register:      "Criar Conta Gratuita",
     footer_copy:       "© 2026 ApexPredict. Previsões não constituem aconselhamento financeiro.",
+    seo_what_title:    "O que é o",
+    seo_what_hl:       "ApexPredict",
+    seo_what_body:     "O ApexPredict é uma plataforma de previsão de ações com inteligência artificial. Utilizando o modelo Prophet e análise técnica avançada, geramos previsões de preço para qualquer ação negociada em bolsa — incluindo ações brasileiras como PETR4, VALE3, BBAS3, ITUB4, WEGE3, e ações americanas como AAPL, TSLA, NVDA, AMZN e MSFT.",
+    seo_how_title:     "Como funciona a",
+    seo_how_hl:        "previsão de ações?",
+    seo_how_body1:     "O nosso sistema recolhe dados históricos de preço e volume, calcula indicadores técnicos como RSI, MACD, Médias Móveis e Bandas de Bollinger, e treina um modelo de machine learning para projetar os preços futuros. O resultado é um gráfico com a tendência prevista para os próximos dias.",
+    seo_how_body2:     "Além da previsão, pode utilizar o backtesting para testar estratégias de compra e venda no passado, e comparar múltiplas ações lado a lado para tomar decisões de investimento mais informadas.",
+    seo_faq_title:     "Perguntas",
+    seo_faq_hl:        "frequentes",
+    seo_faq: [
+      { q: "A previsão de ações com IA é confiável?", a: "A IA identifica padrões históricos e tendências, mas nenhuma ferramenta consegue prever o mercado com 100% de precisão. O ApexPredict é uma ferramenta de apoio à decisão, não um conselho financeiro. Use as previsões em conjunto com a sua própria análise." },
+      { q: "Quais ações posso analisar?", a: "Qualquer ação com ticker válido no Yahoo Finance — ações brasileiras (B3), americanas (NYSE, NASDAQ), europeias e índices globais. Basta digitar o ticker, por exemplo PETR4.SA para ações brasileiras ou AAPL para americanas." },
+      { q: "O que é backtesting?", a: "Backtesting permite testar uma estratégia de investimento com dados históricos. Por exemplo, 'se eu tivesse comprado quando o RSI estava abaixo de 30 e vendido acima de 70, qual seria o retorno?' — o ApexPredict calcula isso automaticamente." },
+      { q: "Existe plano gratuito?", a: "Sim. O plano gratuito inclui um número limitado de previsões por mês. Os planos pagos oferecem previsões ilimitadas, alertas de preço e acesso a todos os indicadores." },
+    ],
   },
 
   dashboard: {
