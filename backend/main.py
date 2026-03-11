@@ -208,18 +208,83 @@ def _build_row(prices: np.ndarray, i: int, use_vol: bool, volumes: np.ndarray) -
     return row
 
 
-def _make_features(prices: np.ndarray, volumes: np.ndarray):
-    """Create (X, y).
+def _build_feature_matrix(prices: np.ndarray, volumes: np.ndarray,
+                          n_rows: int, start: int) -> np.ndarray:
+    """Vectorised feature matrix — identical features to _build_row but computed
+    for all `n_rows` rows at once using numpy/pandas, which is ~100× faster than
+    the Python loop for long price histories (e.g. 10 years of daily data).
 
-    Target y is the **log-return** for each day (more stationary than raw price).
-    Predicting log-returns forces the model to learn how much the price *moves*
-    rather than what the price *is*, which generalises far better out-of-sample.
+    Row j corresponds to position i = start + j (same semantics as _build_row).
     """
     use_vol = len(volumes) == len(prices)
-    rows = [_build_row(prices, i, use_vol, volumes) for i in range(_MIN_HIST, len(prices))]
-    base = np.maximum(prices[_MIN_HIST - 1 : -1], 1e-8)
-    log_returns = np.log(np.maximum(prices[_MIN_HIST:], 1e-8) / base)
-    return np.array(rows, dtype=np.float64), log_returns.astype(np.float64)
+    # cur[j] = prices[start + j - 1]  (the last known close for row j)
+    cur = prices[start - 1 : start - 1 + n_rows]
+    safe_cur = np.maximum(cur, 1e-8)
+
+    cols: list[np.ndarray] = []
+
+    # Normalised lag prices: prices[i-lag] / prices[i-1] - 1
+    for lag in _LAGS:
+        cols.append(prices[start - lag : start - lag + n_rows] / safe_cur - 1.0)
+
+    # Log momentum: log(prices[i-1] / prices[i-lag-1])
+    for lag in [1, 5, 10, 20]:
+        prev = prices[start - lag - 1 : start - lag - 1 + n_rows]
+        cols.append(np.log(np.maximum(cur, 1e-8) / np.maximum(prev, 1e-8)))
+
+    # Rolling mean (normalised): mean(prices[i-w:i]) / prices[i-1] - 1
+    price_ser = pd.Series(prices)
+    for w in _WINDOWS:
+        rm = price_ser.rolling(w).mean().values
+        cols.append(rm[start - 1 : start - 1 + n_rows] / safe_cur - 1.0)
+
+    # Rolling volatility: std(prices[i-w:i]) / prices[i-1]
+    for w in [5, 20, 50]:
+        rs = price_ser.rolling(w).std().values
+        cols.append(rs[start - 1 : start - 1 + n_rows] / safe_cur)
+
+    # Momentum / % change: prices[i-1] / prices[i-p-1] - 1
+    for p in [5, 10, 20, 30]:
+        base_p = prices[start - p - 1 : start - p - 1 + n_rows]
+        cols.append(cur / np.maximum(base_p, 1e-8) - 1.0)
+
+    # Volume features (normalised relative to 20-day average)
+    if use_vol:
+        vol_ser = pd.Series(volumes)
+        mean_20 = vol_ser.rolling(20).mean().values[start - 1 : start - 1 + n_rows]
+        mean_5  = vol_ser.rolling(5).mean().values[start - 1 : start - 1 + n_rows]
+        vol_cur = volumes[start - 1 : start - 1 + n_rows]
+        safe_20 = np.maximum(mean_20, 1e-8)
+        cols.append(vol_cur / safe_20 - 1.0)
+        cols.append(mean_5  / safe_20 - 1.0)
+
+    X = np.column_stack(cols).astype(np.float64)
+    return np.nan_to_num(X, nan=0.0)  # rolling NaN at series start → 0
+
+
+# Cap training rows to keep GBM fast even with very long histories.
+# 1 500 trading days ≈ 6 years, which captures several full market cycles.
+_MAX_TRAIN_ROWS = 1_500
+
+
+def _make_features(prices: np.ndarray, volumes: np.ndarray):
+    """Create (X, y) with vectorised feature building.
+
+    Target y is the **log-return** for each day (more stationary than raw price).
+    Training is capped at the most-recent _MAX_TRAIN_ROWS rows so that very long
+    histories (10+ years) don't make the API unusably slow.
+    """
+    n = len(prices)
+    n_rows_full = n - _MIN_HIST
+    # Use only the most-recent rows if the history is very long
+    n_rows = min(n_rows_full, _MAX_TRAIN_ROWS)
+    start  = n - n_rows   # first row index (i = start … n-1)
+
+    X = _build_feature_matrix(prices, volumes, n_rows, start)
+    base        = np.maximum(prices[start - 1 : start - 1 + n_rows], 1e-8)
+    target      = np.maximum(prices[start     : start     + n_rows], 1e-8)
+    log_returns = np.log(target / base)
+    return X, log_returns.astype(np.float64)
 
 
 def _recursive_forecast(model: GradientBoostingRegressor,
@@ -283,16 +348,21 @@ def _make_features_direct(prices: np.ndarray, volumes: np.ndarray, horizon: int)
     hundreds of recursive steps), each model directly predicts the total
     log-return from the current price to `horizon` days ahead.  Separate models
     per horizon avoid the error accumulation that plagues recursive approaches.
+
+    Uses the same vectorised builder as _make_features for speed.
     """
-    use_vol = len(volumes) == len(prices)
-    n_rows = len(prices) - _MIN_HIST - horizon + 1
-    if n_rows < 20:
+    n = len(prices)
+    n_rows_full = n - _MIN_HIST - horizon + 1
+    if n_rows_full < 20:
         return None, None
-    rows = [_build_row(prices, i, use_vol, volumes) for i in range(_MIN_HIST, _MIN_HIST + n_rows)]
-    base   = np.maximum(prices[_MIN_HIST - 1 : _MIN_HIST - 1 + n_rows], 1e-8)
-    future = np.maximum(prices[_MIN_HIST - 1 + horizon : _MIN_HIST - 1 + horizon + n_rows], 1e-8)
+    n_rows = min(n_rows_full, _MAX_TRAIN_ROWS)
+    start  = _MIN_HIST + (n_rows_full - n_rows)   # align to most-recent rows
+
+    X      = _build_feature_matrix(prices, volumes, n_rows, start)
+    base   = np.maximum(prices[start - 1           : start - 1 + n_rows], 1e-8)
+    future = np.maximum(prices[start - 1 + horizon : start - 1 + horizon + n_rows], 1e-8)
     log_returns_h = np.log(future / base)
-    return np.array(rows, dtype=np.float64), log_returns_h.astype(np.float64)
+    return X, log_returns_h.astype(np.float64)
 
 
 def _direct_forecast(prices: np.ndarray, volumes: np.ndarray,
@@ -465,6 +535,11 @@ def forecast(request: Request, req: ForecastRequest):
         # 1. Build feature matrix (normalised features, log-return targets)
         X, y_true = _make_features(prices, volumes)
 
+        # train_start: index in `prices` where the feature matrix begins.
+        # When history is short (<= _MAX_TRAIN_ROWS) this equals _MIN_HIST;
+        # when capped it is further along so all downstream index math stays correct.
+        train_start = len(prices) - len(X)
+
         def _make_gbm() -> GradientBoostingRegressor:
             return GradientBoostingRegressor(
                 n_estimators=300,
@@ -488,10 +563,10 @@ def forecast(request: Request, req: ForecastRequest):
         val_pred_returns = model_val.predict(X_val)
 
         # Convert log-return predictions → price predictions for human-readable metrics
-        val_start_idx      = _MIN_HIST + (len(X) - val_size)
-        val_prices_actual  = prices[val_start_idx:]
-        val_prices_base    = prices[val_start_idx - 1 : -1]
-        val_prices_pred    = val_prices_base * np.exp(val_pred_returns)
+        val_start_idx     = train_start + (len(X) - val_size)
+        val_prices_actual = prices[val_start_idx : val_start_idx + val_size]
+        val_prices_base   = prices[val_start_idx - 1 : val_start_idx - 1 + val_size]
+        val_prices_pred   = val_prices_base * np.exp(val_pred_returns)
 
         r2   = float(r2_score(val_prices_actual, val_prices_pred))
         mae  = float(mean_absolute_error(val_prices_actual, val_prices_pred))
@@ -506,9 +581,9 @@ def forecast(request: Request, req: ForecastRequest):
         model.fit(X, y_true)
 
         # 4. In-sample price predictions (for the historical overlay on the chart)
-        hist_pred_returns  = model.predict(X)
-        hist_prices_base   = prices[_MIN_HIST - 1 : -1]
-        hist_pred_aligned  = hist_prices_base * np.exp(hist_pred_returns)
+        hist_pred_returns = model.predict(X)
+        hist_prices_base  = prices[train_start - 1 : train_start - 1 + len(X)]
+        hist_pred_aligned = hist_prices_base * np.exp(hist_pred_returns)
 
         last_price = float(prices[-1])
 
@@ -571,8 +646,8 @@ def forecast(request: Request, req: ForecastRequest):
             for t, v in enumerate(future_values)
         ]
 
-        # 7. Full historic_pred — first _MIN_HIST entries have no prediction → None
-        hist_pred_full = [None] * _MIN_HIST + [round(float(v), 4) for v in hist_pred_aligned]
+        # 7. Full historic_pred — entries before train_start have no prediction → None
+        hist_pred_full = [None] * train_start + [round(float(v), 4) for v in hist_pred_aligned]
 
         return {
             "meta": meta,
