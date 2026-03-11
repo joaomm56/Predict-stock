@@ -164,6 +164,19 @@ _WINDOWS = [5, 10, 20, 50]
 _MIN_HIST = max(_LAGS + _WINDOWS)  # 60 — minimum history needed
 
 
+class EnsembleModel:
+    """Averages predictions from multiple GBMs to reduce variance.
+
+    Using 3 models × 100 estimators gives roughly the same compute budget
+    as 1 model × 300 but with much lower prediction variance.
+    """
+    def __init__(self, models: list):
+        self.models = models
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        return np.mean([m.predict(X) for m in self.models], axis=0)
+
+
 def _build_row(prices: np.ndarray, i: int, use_vol: bool, volumes: np.ndarray) -> list:
     """Build one feature row at position i (i >= _MIN_HIST).
 
@@ -206,6 +219,42 @@ def _build_row(prices: np.ndarray, i: int, use_vol: bool, volumes: np.ndarray) -
         safe_20v = max(mean_20v, 1e-8)
         row.append(volumes[i - 1] / safe_20v - 1.0)
         row.append(mean_5v / safe_20v - 1.0)
+
+    # ── Technical indicator features ──────────────────────────────────────────
+    # RSI (14) — normalised to [-0.5, 0.5]
+    _diffs = np.diff(prices[max(0, i - 15) : i])
+    if len(_diffs) > 0:
+        _gains  = float(np.mean(np.maximum( _diffs, 0)))
+        _losses = float(np.mean(np.maximum(-_diffs, 0)))
+        _rs     = _gains / max(_losses, 1e-8)
+        _rsi    = 100.0 - 100.0 / (1.0 + _rs)
+    else:
+        _rsi = 50.0
+    row.append(float(np.clip(_rsi / 100.0 - 0.5, -0.5, 0.5)))
+
+    # MACD line / price — scale-invariant momentum
+    _p_ewm = pd.Series(prices[max(0, i - 60) : i])
+    _ema12 = float(_p_ewm.ewm(span=12, adjust=False).mean().iloc[-1])
+    _ema26 = float(_p_ewm.ewm(span=26, adjust=False).mean().iloc[-1])
+    row.append(float(np.clip((_ema12 - _ema26) / safe_cur, -1.0, 1.0)))
+
+    # Bollinger %B — position within bands, centred at 0
+    _bb_w  = prices[max(0, i - 20) : i]
+    _bb_m  = float(np.mean(_bb_w))
+    _bb_s  = float(np.std(_bb_w))
+    _bb_bw = max(4.0 * _bb_s, 1e-8)
+    row.append(float(np.clip((prices[i - 1] - (_bb_m - 2.0 * _bb_s)) / _bb_bw - 0.5, -1.0, 1.0)))
+
+    # Distance from 200-day MA (uses all available history up to 200 days)
+    _ma200_w = prices[max(0, i - 200) : i]
+    row.append(float(np.clip(prices[i - 1] / max(float(np.mean(_ma200_w)), 1e-8) - 1.0, -2.0, 2.0)))
+
+    # 20-day log-price trend slope
+    if i >= 21:
+        _slope20 = (np.log(max(prices[i - 1], 1e-8)) - np.log(max(prices[i - 21], 1e-8))) / 20.0
+    else:
+        _slope20 = 0.0
+    row.append(float(np.clip(_slope20, -0.5, 0.5)))
 
     # Clip all features to ±10 to prevent extreme values during recursive forecast
     return [float(np.clip(v, -10.0, 10.0)) for v in row]
@@ -261,6 +310,39 @@ def _build_feature_matrix(prices: np.ndarray, volumes: np.ndarray,
         cols.append(vol_cur / safe_20 - 1.0)
         cols.append(mean_5  / safe_20 - 1.0)
 
+    # ── Technical indicator features (must match _build_row exactly) ──────────
+    # RSI (14) — normalised to [-0.5, 0.5]
+    _delta = price_ser.diff()
+    _gain  = _delta.clip(lower=0).rolling(14).mean()
+    _loss  = (-_delta.clip(upper=0)).rolling(14).mean()
+    _rs    = _gain / (_loss + 1e-8)
+    _rsi   = (100 - 100 / (1 + _rs)) / 100.0 - 0.5
+    cols.append(_rsi.values[start - 1 : start - 1 + n_rows])
+
+    # MACD line / price — scale-invariant
+    _ema12 = price_ser.ewm(span=12, adjust=False).mean()
+    _ema26 = price_ser.ewm(span=26, adjust=False).mean()
+    _macd  = (_ema12 - _ema26) / price_ser.replace(0.0, 1e-8)
+    cols.append(_macd.values[start - 1 : start - 1 + n_rows])
+
+    # Bollinger %B — position within bands, centred at 0
+    _sma20   = price_ser.rolling(20).mean()
+    _std20   = price_ser.rolling(20).std()
+    _bb_lo   = _sma20 - 2 * _std20
+    _bb_bw   = (4 * _std20).replace(0.0, 1e-8)
+    _bb_pctb = (price_ser - _bb_lo) / _bb_bw - 0.5
+    cols.append(_bb_pctb.fillna(0.0).values[start - 1 : start - 1 + n_rows])
+
+    # Distance from 200-day MA (0 if insufficient history)
+    _ma200   = price_ser.rolling(200).mean()
+    _dist200 = (price_ser / _ma200 - 1.0).fillna(0.0)
+    cols.append(_dist200.values[start - 1 : start - 1 + n_rows])
+
+    # 20-day log-price trend slope
+    _log_p   = np.log(price_ser.replace(0.0, 1e-8))
+    _slope20 = (_log_p - _log_p.shift(20)) / 20.0
+    cols.append(_slope20.fillna(0.0).values[start - 1 : start - 1 + n_rows])
+
     X = np.column_stack(cols).astype(np.float64)
     X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)  # rolling NaN at series start → 0
     return np.clip(X, -10.0, 10.0)  # clip outlier features to prevent extreme predictions
@@ -315,9 +397,11 @@ def _recursive_forecast(model: GradientBoostingRegressor,
     else:
         _MAX_DAILY_LOG_RET = np.log(1.05)   # fallback: ±5 % per day
 
-    use_vol = len(volumes) == len(prices)
-    buf     = list(prices[-_MIN_HIST:])
-    vbuf    = list(volumes[-_MIN_HIST:]) if use_vol else []
+    use_vol   = len(volumes) == len(prices)
+    # 200-element buffer so the MA200 feature has full history during inference
+    _buf_size = max(_MIN_HIST, 200)
+    buf       = list(prices[-_buf_size:])
+    vbuf      = list(volumes[-_buf_size:]) if use_vol else []
 
     raw_preds = []
     vol_arr   = np.array([])
@@ -595,9 +679,17 @@ def forecast(request: Request, req: ForecastRequest):
         # true systematic over/under-shooting — not the near-zero in-sample residual.
         return_bias = float(np.mean(val_pred_returns - y_val))
 
-        # 3. Final model trained on ALL data for the actual forecast
-        model = _make_gbm()
-        model.fit(X, y_true)
+        # 3. Ensemble of 3 GBMs trained on ALL data — reduces prediction variance.
+        #    3 × 100 estimators ≈ same compute budget as 1 × 300 estimators.
+        _ens_models = []
+        for _seed in [42, 7, 13]:
+            _m = GradientBoostingRegressor(
+                n_estimators=100, learning_rate=0.05, max_depth=4,
+                subsample=0.8, min_samples_leaf=5, random_state=_seed,
+            )
+            _m.fit(X, y_true)
+            _ens_models.append(_m)
+        model = EnsembleModel(_ens_models)
 
         # 4. In-sample price predictions (for the historical overlay on the chart)
         hist_pred_returns = model.predict(X)
