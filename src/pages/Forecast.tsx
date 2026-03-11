@@ -16,22 +16,33 @@ function buildChartData(result: ForecastResponse, chartHistoryDays: number): Cha
   const realMap = new Map(result.real.dates.map((d, i) => [d, result.real.values[i]]));
   const histMap = new Map(result.historic_pred.dates.map((d, i) => [d, result.historic_pred.values[i]]));
 
+  // Compute a clamp range from real price history so extreme model outliers are hidden.
+  // Predictions beyond ±80 % of the last price are almost certainly model artefacts.
+  const realPrices = result.real.values.filter((v) => v != null && v > 0) as number[];
+  const lastReal   = realPrices[realPrices.length - 1] ?? 1;
+  const clampLo    = lastReal * 0.20;   // hide if < 20 % of last price
+  const clampHi    = lastReal * 3.00;   // hide if > 3× last price
+  const clamp = (v: number | null): number | null =>
+    v == null || v < clampLo || v > clampHi ? null : v;
+
   const historicalPoints: ChartPoint[] = result.real.dates.map((d) => ({
     name: d.slice(0, 7),
     price: realMap.get(d) ?? null,
-    predicted: histMap.get(d) ?? null,
+    predicted: clamp(histMap.get(d) ?? null),
   }));
 
   // Limit historical points shown based on plan's chartHistoryDays
   const trimmed = historicalPoints.slice(-chartHistoryDays);
 
   const futurePoints: ChartPoint[] = result.future_pred.dates.map((d, i) => {
-    const confLow  = result.future_pred.conf_low?.[i]  ?? null;
-    const confHigh = result.future_pred.conf_high?.[i] ?? null;
+    const raw      = result.future_pred.values[i];
+    const clamped  = clamp(raw);
+    const confLow  = clamp(result.future_pred.conf_low?.[i]  ?? null);
+    const confHigh = clamp(result.future_pred.conf_high?.[i] ?? null);
     return {
       name: d.slice(0, 7),
       price: null,
-      predicted: result.future_pred.values[i],
+      predicted: clamped,
       conf_low:  confLow,
       conf_band: confHigh !== null && confLow !== null ? confHigh - confLow : null,
     };
