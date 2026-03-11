@@ -99,13 +99,14 @@ async def global_exception_handler(request: Request, exc: Exception):
 FREE_FORECASTS_PER_DAY = 5
 
 
-def check_and_increment_quota(token: str) -> None:
-    """Validates user JWT and enforces daily quota for free-plan users.
-    Raises HTTPException 429 if the limit is reached.
-    Fails open (no error) if Supabase is unavailable — rate limiting covers abuse.
+def check_and_increment_quota(token: str) -> str:
+    """Validates user JWT, enforces daily quota for free-plan users, and returns the plan.
+
+    Raises HTTPException 429 if the free daily limit is reached.
+    Returns 'free' if Supabase is unavailable (fails open — rate limiting covers abuse).
     """
     if not token or not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
-        return
+        return "free"
 
     try:
         from supabase import create_client
@@ -114,13 +115,13 @@ def check_and_increment_quota(token: str) -> None:
         user_resp = sb.auth.get_user(token)
         user = user_resp.user
         if not user:
-            return
+            return "free"
 
         meta = user.user_metadata or {}
-        plan = meta.get("plan", "free")
+        plan: str = meta.get("plan", "free") or "free"
 
         if plan != "free":
-            return  # paid plans have no daily limit
+            return plan  # paid plans have no daily limit
 
         today = datetime.utcnow().strftime("%Y-%m-%d")
         quota_date = meta.get("quota_date", "")
@@ -135,11 +136,13 @@ def check_and_increment_quota(token: str) -> None:
         sb.auth.admin.update_user_by_id(user.id, {
             "user_metadata": {**meta, "quota_date": today, "quota_count": quota_count + 1}
         })
+        return "free"
 
     except HTTPException:
         raise
     except Exception as e:
         print(f"Quota check error: {e}")  # fail open
+        return "free"
 
 
 # ── Models ────────────────────────────────────────────────────────────────────
@@ -221,13 +224,22 @@ def _make_features(prices: np.ndarray, volumes: np.ndarray):
 
 def _recursive_forecast(model: GradientBoostingRegressor,
                          prices: np.ndarray, volumes: np.ndarray,
-                         forecast_days: int) -> list[float]:
+                         forecast_days: int,
+                         return_bias: float = 0.0) -> list[float]:
     """Recursively predict future prices using log-return predictions.
 
-    Because the model predicts log-returns (not raw prices) the feature window
-    stays in the normalised domain regardless of how far prices drift — there is
-    no need for an explicit trend-extrapolation anchor.
+    Two safeguards prevent runaway (exponentially exploding) forecasts:
+
+    1. Bias correction  — subtracts the model's mean in-sample error so
+       systematic over-optimism / over-pessimism doesn't compound over hundreds
+       of steps.
+
+    2. Daily return cap — clamps each predicted log-return to ±5 % per day.
+       Real stocks almost never move more than that on a single session, so
+       anything outside this range is a model artefact, not a valid signal.
     """
+    _MAX_DAILY_LOG_RET = np.log(1.05)   # ±5 % per day hard cap
+
     use_vol = len(volumes) == len(prices)
     buf     = list(prices[-_MIN_HIST:])
     vbuf    = list(volumes[-_MIN_HIST:]) if use_vol else []
@@ -241,6 +253,11 @@ def _recursive_forecast(model: GradientBoostingRegressor,
         row     = _build_row(b, len(b), use_vol, vol_arr)
         log_ret = float(model.predict(np.array([row]))[0])
 
+        # 1. Remove systematic bias
+        log_ret -= return_bias
+        # 2. Hard cap — no single-day move beyond ±5 %
+        log_ret  = float(np.clip(log_ret, -_MAX_DAILY_LOG_RET, _MAX_DAILY_LOG_RET))
+
         # Convert predicted log-return back to price
         next_price = max(buf[-1] * np.exp(log_ret), 0.01)
         raw_preds.append(next_price)
@@ -252,6 +269,83 @@ def _recursive_forecast(model: GradientBoostingRegressor,
             vbuf = vbuf[1:]
 
     return raw_preds
+
+
+# ── Direct multi-step helpers (pro / premium) ─────────────────────────────────
+# Horizons (in trading days) for which we train a dedicated model.
+_DIRECT_HORIZONS = [5, 10, 20, 30, 60, 90, 180, 365, 730]
+
+
+def _make_features_direct(prices: np.ndarray, volumes: np.ndarray, horizon: int):
+    """Feature matrix with the *h-step-ahead* cumulative log-return as target.
+
+    Instead of predicting tomorrow's log-return (which compounds error over
+    hundreds of recursive steps), each model directly predicts the total
+    log-return from the current price to `horizon` days ahead.  Separate models
+    per horizon avoid the error accumulation that plagues recursive approaches.
+    """
+    use_vol = len(volumes) == len(prices)
+    n_rows = len(prices) - _MIN_HIST - horizon + 1
+    if n_rows < 20:
+        return None, None
+    rows = [_build_row(prices, i, use_vol, volumes) for i in range(_MIN_HIST, _MIN_HIST + n_rows)]
+    base   = np.maximum(prices[_MIN_HIST - 1 : _MIN_HIST - 1 + n_rows], 1e-8)
+    future = np.maximum(prices[_MIN_HIST - 1 + horizon : _MIN_HIST - 1 + horizon + n_rows], 1e-8)
+    log_returns_h = np.log(future / base)
+    return np.array(rows, dtype=np.float64), log_returns_h.astype(np.float64)
+
+
+def _direct_forecast(prices: np.ndarray, volumes: np.ndarray,
+                     forecast_days: int,
+                     model_map: dict) -> list:
+    """Produce a `forecast_days`-long price series from direct h-step models.
+
+    Each anchor horizon gives an independent (low-bias) estimate of the future
+    price.  Intermediate days are filled by linearly interpolating between
+    adjacent anchors in log-return space — preserving monotonicity and avoiding
+    the compounding error of recursive chaining.
+    """
+    use_vol = len(volumes) == len(prices)
+    vol_arr = volumes if use_vol else np.array([])
+    row = _build_row(prices, len(prices), use_vol, vol_arr)
+    last_price = float(prices[-1])
+
+    # --- Predict anchors -------------------------------------------------------
+    anchor_log_rets: dict[int, float] = {}
+    for h, m in sorted(model_map.items()):
+        lr = float(m.predict([row])[0])
+        # Cap implied daily move to ±5 % (same safeguard as recursive model)
+        cap = np.log(1.05) * h
+        anchor_log_rets[h] = float(np.clip(lr, -cap, cap))
+
+    anchor_list = sorted(anchor_log_rets.keys())
+
+    # --- Interpolate / extrapolate for every day t (1-indexed) ----------------
+    result: list[float] = []
+    for t in range(1, forecast_days + 1):
+        if t in anchor_log_rets:
+            log_ret = anchor_log_rets[t]
+        elif t < anchor_list[0]:
+            # Before the first anchor — scale proportionally from 0
+            h0 = anchor_list[0]
+            log_ret = anchor_log_rets[h0] * t / h0
+        elif t > anchor_list[-1]:
+            # Beyond last anchor — extrapolate at the last anchor's daily rate
+            h_last = anchor_list[-1]
+            daily_rate = anchor_log_rets[h_last] / h_last
+            raw = anchor_log_rets[h_last] + daily_rate * (t - h_last)
+            cap = np.log(1.05) * t
+            log_ret = float(np.clip(raw, -cap, cap))
+        else:
+            # Linear interpolation between the two surrounding anchors
+            h_lo = max(h for h in anchor_list if h <= t)
+            h_hi = min(h for h in anchor_list if h >= t)
+            frac = (t - h_lo) / (h_hi - h_lo)
+            log_ret = anchor_log_rets[h_lo] + frac * (anchor_log_rets[h_hi] - anchor_log_rets[h_lo])
+
+        result.append(max(last_price * np.exp(log_ret), 0.01))
+
+    return result
 
 
 # ── Stock data helper ──────────────────────────────────────────────────────────
@@ -346,8 +440,8 @@ def forecast(request: Request, req: ForecastRequest):
     ticker = req.ticker.upper()
 
     auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        check_and_increment_quota(auth_header[7:])
+    token = auth_header[7:] if auth_header.startswith("Bearer ") else ""
+    user_plan = check_and_increment_quota(token) if token else "free"
 
     try:
         # Always fetch at least 130 calendar days so GBM has enough lag history.
@@ -424,8 +518,46 @@ def forecast(request: Request, req: ForecastRequest):
             start=last_date + pd.Timedelta(days=1),
             periods=req.forecast_days,
         )
-        future_values = _recursive_forecast(model, prices, volumes, req.forecast_days)
-        end_price     = future_values[-1]
+        # Bias = mean in-sample prediction error in log-return space.
+        # Subtracting it stops systematic over/under-shooting from compounding
+        # over hundreds of recursive steps (e.g. TRMD-style explosions).
+        return_bias = float(np.mean(hist_pred_returns - y_true))
+
+        # 5b. For paid plans: train direct h-step models per anchor horizon.
+        #     Each model predicts the total log-return from today to day h,
+        #     eliminating recursive error accumulation for long-horizon forecasts.
+        def _make_direct_gbm() -> GradientBoostingRegressor:
+            return GradientBoostingRegressor(
+                n_estimators=200,       # fewer than main model — speed trade-off
+                learning_rate=0.05,
+                max_depth=4,
+                subsample=0.8,
+                min_samples_leaf=5,
+                random_state=42,
+            )
+
+        used_direct = False
+        if user_plan in ("pro", "premium"):
+            direct_models: dict = {}
+            for h in _DIRECT_HORIZONS:
+                if h > req.forecast_days:
+                    continue
+                X_h, y_h = _make_features_direct(prices, volumes, h)
+                if X_h is not None:
+                    m_h = _make_direct_gbm()
+                    m_h.fit(X_h, y_h)
+                    direct_models[h] = m_h
+
+            if direct_models:
+                future_values = _direct_forecast(prices, volumes, req.forecast_days, direct_models)
+                used_direct = True
+            else:
+                # Fallback to recursive if not enough data for any horizon
+                future_values = _recursive_forecast(model, prices, volumes, req.forecast_days, return_bias)
+        else:
+            future_values = _recursive_forecast(model, prices, volumes, req.forecast_days, return_bias)
+
+        end_price = future_values[-1]
 
         # 6. Confidence intervals: uncertainty grows as ±1.96·σ·√t (random-walk scaling).
         #    This produces the realistic "cone of uncertainty" — narrow near the start,
@@ -446,6 +578,7 @@ def forecast(request: Request, req: ForecastRequest):
             "meta": meta,
             "ticker": ticker,
             "last_price": last_price,
+            "model_type": "direct" if used_direct else "recursive",
             "metrics": {"r2": round(r2, 4), "mae": round(mae, 4), "mape": round(mape, 4)},
             "forecast_end_price": round(end_price, 2),
             "real": {

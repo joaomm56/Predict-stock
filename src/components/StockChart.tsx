@@ -73,13 +73,30 @@ const StockChart = ({ chartData }: StockChartProps) => {
             domain={["auto", "auto"]}
           />
           <Tooltip
-            contentStyle={{
-              background: "hsl(220, 18%, 7%)",
-              border: "1px solid hsl(220, 15%, 14%)",
-              borderRadius: "8px",
-              fontFamily: "JetBrains Mono",
-              fontSize: "12px",
-              color: "hsl(200, 20%, 90%)",
+            content={({ active, payload, label }) => {
+              if (!active || !payload?.length) return null;
+              const visible = payload.filter(
+                (p) => p.dataKey !== "conf_band" && p.dataKey !== "conf_low"
+              );
+              if (!visible.length) return null;
+              return (
+                <div style={{
+                  background: "hsl(220, 18%, 7%)",
+                  border: "1px solid hsl(220, 15%, 14%)",
+                  borderRadius: "8px",
+                  fontFamily: "JetBrains Mono",
+                  fontSize: "12px",
+                  color: "hsl(200, 20%, 90%)",
+                  padding: "8px 12px",
+                }}>
+                  <p style={{ marginBottom: 4, opacity: 0.6 }}>{label}</p>
+                  {visible.map((p) => (
+                    <p key={String(p.dataKey)} style={{ color: p.color, margin: "2px 0" }}>
+                      {p.name} : {p.value}
+                    </p>
+                  ))}
+                </div>
+              );
             }}
           />
           <Area
