@@ -78,6 +78,7 @@ const Forecast = () => {
   const [daysOpen, setDaysOpen] = useState(false);
   const daysRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(false);
+  const [slowRequest, setSlowRequest] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ForecastResponse | null>(null);
   const [chartData, setChartData] = useState<ChartPoint[] | undefined>(undefined);
@@ -104,6 +105,27 @@ const Forecast = () => {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
+  const classifyError = (err: unknown): string => {
+    const msg = err instanceof Error ? err.message : String(err);
+    const sym = ticker.trim();
+    if (msg.includes("Failed to fetch") || msg.includes("NetworkError") || msg.includes("network")) {
+      return t.forecast.err_server;
+    }
+    if (msg.includes("504") || msg.includes("502") || msg.includes("503")) {
+      return t.forecast.err_server;
+    }
+    if (msg.includes("404") || /not found/i.test(msg) || /no data/i.test(msg) || /invalid ticker/i.test(msg)) {
+      return t.forecast.err_not_found.replace("{ticker}", sym);
+    }
+    if (/not enough/i.test(msg) || /insufficient/i.test(msg) || /too few/i.test(msg)) {
+      return t.forecast.err_no_data.replace("{ticker}", sym);
+    }
+    if (msg.includes("422")) {
+      return t.forecast.err_not_found.replace("{ticker}", sym);
+    }
+    return t.forecast.err_unknown;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!ticker.trim()) return;
@@ -114,9 +136,12 @@ const Forecast = () => {
     }
 
     setLoading(true);
+    setSlowRequest(false);
     setError(null);
     setResult(null);
     setChartData(undefined);
+
+    const slowTimer = setTimeout(() => setSlowRequest(true), 15_000);
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -140,9 +165,11 @@ const Forecast = () => {
         });
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : t.common.error);
+      setError(classifyError(err));
     } finally {
+      clearTimeout(slowTimer);
       setLoading(false);
+      setSlowRequest(false);
     }
   };
 
@@ -333,7 +360,7 @@ const Forecast = () => {
             </div>
             <p className="font-semibold text-foreground mb-1">{t.forecast.loading_title}</p>
             <p className="text-sm text-muted-foreground max-w-xs mx-auto">
-              {t.forecast.loading_desc}
+              {slowRequest ? t.forecast.loading_slow : t.forecast.loading_desc}
             </p>
             <div className="mt-6 flex justify-center gap-1.5">
               {t.forecast.steps.map((step, i) => (
