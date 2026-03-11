@@ -217,7 +217,7 @@ const Dashboard = () => {
         </motion.div>
 
         {/* Stat cards */}
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
+        <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-4 mb-10">
           {stats.map((s, i) => (
             <motion.div
               key={s.label}
@@ -242,7 +242,7 @@ const Dashboard = () => {
         </div>
 
         {/* Main grid */}
-        <div className="grid lg:grid-cols-[340px_1fr] gap-6 mb-6">
+        <div className="grid md:grid-cols-[280px_1fr] lg:grid-cols-[340px_1fr] gap-6 mb-6">
 
           {/* Favorites panel */}
           <motion.div

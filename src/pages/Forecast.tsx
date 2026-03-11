@@ -193,7 +193,7 @@ const Forecast = () => {
           onSubmit={handleSubmit}
           className="glass rounded-2xl p-6 max-w-3xl mx-auto mb-10 overflow-visible relative z-20"
         >
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4 items-end">
+          <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-4 mb-4 items-end">
             <div>
               <label className="block text-xs text-muted-foreground mb-1.5 font-mono">{t.forecast.lbl_ticker}</label>
               <input

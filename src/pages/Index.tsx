@@ -93,7 +93,7 @@ const Index = () => {
         </div>
 
         <div className="container relative mx-auto px-6 pt-24">
-          <div className="grid lg:grid-cols-2 gap-12 items-center">
+          <div className="grid md:grid-cols-2 gap-12 items-center">
             <motion.div
               initial={{ opacity: 0, x: -30 }}
               animate={{ opacity: 1, x: 0 }}
@@ -198,7 +198,7 @@ const Index = () => {
             </p>
           </motion.div>
 
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-4">
             {cards.map((c, i) => (
               <PredictionCard key={c.symbol} {...c} delay={i * 0.1} />
             ))}
@@ -223,7 +223,7 @@ const Index = () => {
             </p>
           </motion.div>
 
-          <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-4">
             {features.map((f, i) => (
               <FeatureCard key={f.title} {...f} delay={i * 0.1} />
             ))}
