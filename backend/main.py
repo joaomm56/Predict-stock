@@ -174,10 +174,11 @@ def _build_row(prices: np.ndarray, i: int, use_vol: bool, volumes: np.ndarray) -
     """
     row = []
     cur = prices[i - 1]  # most recent known close
+    safe_cur = max(cur, 1e-8)
 
     # Normalised lag prices  (relative distance from current price)
     for lag in _LAGS:
-        row.append(prices[i - lag] / cur - 1.0 if cur > 0 else 0.0)
+        row.append(prices[i - lag] / safe_cur - 1.0)
 
     # Log momentum (unchanged — already relative)
     for lag in [1, 5, 10, 20]:
@@ -187,25 +188,27 @@ def _build_row(prices: np.ndarray, i: int, use_vol: bool, volumes: np.ndarray) -
     # Rolling mean (normalised)
     for w in _WINDOWS:
         mean_w = float(np.mean(prices[i - w : i]))
-        row.append(mean_w / cur - 1.0 if cur > 0 else 0.0)
+        row.append(mean_w / safe_cur - 1.0)
 
     # Rolling volatility (normalised — coefficient of variation)
     for w in [5, 20, 50]:
-        row.append(float(np.std(prices[max(0, i - w) : i])) / cur if cur > 0 else 0.0)
+        row.append(float(np.std(prices[max(0, i - w) : i])) / safe_cur)
 
     # Momentum / % change (unchanged — already relative)
     for p in [5, 10, 20, 30]:
         base = prices[i - p - 1] if (i - p - 1) >= 0 else prices[0]
-        row.append(prices[i - 1] / base - 1.0 if base > 0 else 0.0)
+        row.append(prices[i - 1] / max(base, 1e-8) - 1.0)
 
     # Volume features (normalised relative to 20-day average)
     if use_vol:
         mean_20v = float(np.mean(volumes[max(0, i - 20) : i]))
         mean_5v  = float(np.mean(volumes[max(0, i - 5)  : i]))
-        row.append(volumes[i - 1] / mean_20v - 1.0 if mean_20v > 0 else 0.0)
-        row.append(mean_5v / mean_20v - 1.0          if mean_20v > 0 else 0.0)
+        safe_20v = max(mean_20v, 1e-8)
+        row.append(volumes[i - 1] / safe_20v - 1.0)
+        row.append(mean_5v / safe_20v - 1.0)
 
-    return row
+    # Clip all features to ±10 to prevent extreme values during recursive forecast
+    return [float(np.clip(v, -10.0, 10.0)) for v in row]
 
 
 def _build_feature_matrix(prices: np.ndarray, volumes: np.ndarray,
@@ -259,7 +262,8 @@ def _build_feature_matrix(prices: np.ndarray, volumes: np.ndarray,
         cols.append(mean_5  / safe_20 - 1.0)
 
     X = np.column_stack(cols).astype(np.float64)
-    return np.nan_to_num(X, nan=0.0)  # rolling NaN at series start → 0
+    X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)  # rolling NaN at series start → 0
+    return np.clip(X, -10.0, 10.0)  # clip outlier features to prevent extreme predictions
 
 
 # Cap training rows to keep GBM fast even with very long histories.
@@ -295,15 +299,21 @@ def _recursive_forecast(model: GradientBoostingRegressor,
 
     Two safeguards prevent runaway (exponentially exploding) forecasts:
 
-    1. Bias correction  — subtracts the model's mean in-sample error so
+    1. Bias correction  — subtracts the model's mean out-of-sample error so
        systematic over-optimism / over-pessimism doesn't compound over hundreds
        of steps.
 
-    2. Daily return cap — clamps each predicted log-return to ±5 % per day.
-       Real stocks almost never move more than that on a single session, so
-       anything outside this range is a model artefact, not a valid signal.
+    2. Daily return cap — clamps each predicted log-return based on the asset's
+       own historical volatility (99th percentile of daily moves), so the cap
+       adapts to the stock's real behaviour instead of a one-size-fits-all 5%.
     """
-    _MAX_DAILY_LOG_RET = np.log(1.05)   # ±5 % per day hard cap
+    # Data-driven daily cap: 99th percentile of historical |log-returns| × 1.5
+    hist_log_rets = np.diff(np.log(np.maximum(prices[-252:], 1e-8)))
+    if len(hist_log_rets) >= 10:
+        cap_99 = float(np.percentile(np.abs(hist_log_rets), 99))
+        _MAX_DAILY_LOG_RET = max(cap_99 * 1.5, np.log(1.02))
+    else:
+        _MAX_DAILY_LOG_RET = np.log(1.05)   # fallback: ±5 % per day
 
     use_vol = len(volumes) == len(prices)
     buf     = list(prices[-_MIN_HIST:])
@@ -572,9 +582,18 @@ def forecast(request: Request, req: ForecastRequest):
         mae  = float(mean_absolute_error(val_prices_actual, val_prices_pred))
         mape = float(mean_absolute_percentage_error(val_prices_actual, val_prices_pred) * 100)
 
-        # Daily prediction-error volatility — drives the confidence-interval width
-        log_errors = np.log(np.maximum(val_prices_pred, 1e-8) / np.maximum(val_prices_actual, 1e-8))
-        daily_vol  = float(np.std(log_errors)) if len(log_errors) >= 5 else float(np.std(y_true))
+        # Daily prediction-error volatility — drives the confidence-interval width.
+        # Use the max of prediction-error vol and realized return vol so that CIs
+        # are never unrealistically narrow even when the model looks accurate on validation.
+        log_errors   = np.log(np.maximum(val_prices_pred, 1e-8) / np.maximum(val_prices_actual, 1e-8))
+        pred_err_vol = float(np.std(log_errors)) if len(log_errors) >= 5 else float(np.std(y_true))
+        realized_vol = float(np.std(y_true[-min(252, len(y_true)):]))
+        daily_vol    = max(pred_err_vol, realized_vol)
+
+        # Bias = mean out-of-sample prediction error in log-return space.
+        # Computed on the VALIDATION set (data the model never saw) so it reflects
+        # true systematic over/under-shooting — not the near-zero in-sample residual.
+        return_bias = float(np.mean(val_pred_returns - y_val))
 
         # 3. Final model trained on ALL data for the actual forecast
         model = _make_gbm()
@@ -593,10 +612,6 @@ def forecast(request: Request, req: ForecastRequest):
             start=last_date + pd.Timedelta(days=1),
             periods=req.forecast_days,
         )
-        # Bias = mean in-sample prediction error in log-return space.
-        # Subtracting it stops systematic over/under-shooting from compounding
-        # over hundreds of recursive steps (e.g. TRMD-style explosions).
-        return_bias = float(np.mean(hist_pred_returns - y_true))
 
         # 5b. For paid plans: train direct h-step models per anchor horizon.
         #     Each model predicts the total log-return from today to day h,
