@@ -275,7 +275,7 @@ const Mercado = () => {
                 {/* Row */}
                 <div
                   onClick={() => handleRowClick(s.ticker)}
-                  className={`flex items-center justify-between px-6 py-4 transition-colors cursor-pointer ${
+                  className={`flex items-center justify-between px-3 sm:px-6 py-4 transition-colors cursor-pointer ${
                     selectedTicker === s.ticker
                       ? "bg-primary/5 border-l-2 border-primary"
                       : "hover:bg-secondary/30"

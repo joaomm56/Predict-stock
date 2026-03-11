@@ -126,7 +126,7 @@ const Portfolio = () => {
             <Briefcase className="h-3.5 w-3.5 text-primary" />
             <span className="font-mono text-xs text-primary">{t.portfolio.badge}</span>
           </div>
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
             <h1 className="text-3xl font-bold text-foreground">{t.portfolio.title} <span className="text-primary">{t.portfolio.title_hl}</span></h1>
             <button
               onClick={handleRefresh}
@@ -274,7 +274,7 @@ const Portfolio = () => {
                 initial={{ opacity: 0, x: -16 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.3, delay: i * 0.05 }}
-                className="glass rounded-xl px-5 py-4 flex items-center justify-between"
+                className="glass rounded-xl px-4 sm:px-5 py-4 flex items-center justify-between gap-2 flex-wrap"
               >
                 <div className="flex items-center gap-4">
                   <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">

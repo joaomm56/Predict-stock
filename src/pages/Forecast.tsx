@@ -380,7 +380,7 @@ const Forecast = () => {
                 <span className="font-mono text-2xl font-bold text-primary">{result.ticker}</span>
                 <p className="text-sm text-muted-foreground mt-0.5">{result.meta.name} · {result.meta.sector} · {result.meta.country}</p>
               </div>
-              <div className="flex items-center gap-6">
+              <div className="flex items-center gap-4 sm:gap-6 flex-wrap">
                 <div className="text-right">
                   <p className="text-xs text-muted-foreground font-mono mb-0.5">{t.forecast.result_current}</p>
                   <span className="font-mono text-xl font-bold text-foreground">

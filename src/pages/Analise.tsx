@@ -178,7 +178,7 @@ const Analise = () => {
                 )}
               </div>
 
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-3 gap-2 sm:gap-4">
                 {[
                   { label: t.analise.lbl_sector,   value: info.sector },
                   { label: t.analise.lbl_country,  value: info.country },
