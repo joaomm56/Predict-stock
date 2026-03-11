@@ -21,6 +21,8 @@ export interface ForecastRequest {
 export interface Series {
   dates: string[];
   values: number[];
+  conf_low?: number[];
+  conf_high?: number[];
 }
 
 export interface OhlcvSeries {

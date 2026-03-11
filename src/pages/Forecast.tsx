@@ -25,11 +25,17 @@ function buildChartData(result: ForecastResponse, chartHistoryDays: number): Cha
   // Limit historical points shown based on plan's chartHistoryDays
   const trimmed = historicalPoints.slice(-chartHistoryDays);
 
-  const futurePoints: ChartPoint[] = result.future_pred.dates.map((d) => ({
-    name: d.slice(0, 7),
-    price: null,
-    predicted: result.future_pred.values[result.future_pred.dates.indexOf(d)],
-  }));
+  const futurePoints: ChartPoint[] = result.future_pred.dates.map((d, i) => {
+    const confLow  = result.future_pred.conf_low?.[i]  ?? null;
+    const confHigh = result.future_pred.conf_high?.[i] ?? null;
+    return {
+      name: d.slice(0, 7),
+      price: null,
+      predicted: result.future_pred.values[i],
+      conf_low:  confLow,
+      conf_band: confHigh !== null && confLow !== null ? confHigh - confLow : null,
+    };
+  });
 
   // Sample future to ~24 points
   const step = Math.max(1, Math.floor(futurePoints.length / 24));

@@ -6,6 +6,10 @@ export interface ChartPoint {
   name: string;
   price: number | null;
   predicted: number | null;
+  /** Bottom of the confidence band (for future forecast only). */
+  conf_low?: number | null;
+  /** Height of the confidence band = conf_high − conf_low (for recharts stacking). */
+  conf_band?: number | null;
 }
 
 const generateData = () => {
@@ -85,6 +89,31 @@ const StockChart = ({ chartData }: StockChartProps) => {
             fillOpacity={1}
             fill="url(#colorPrice)"
             name={t.common.real_price}
+          />
+          {/* Confidence band — rendered as two stacked areas (bottom transparent + band filled) */}
+          <Area
+            type="monotone"
+            dataKey="conf_low"
+            stroke="none"
+            fill="transparent"
+            fillOpacity={1}
+            stackId="conf"
+            legendType="none"
+            dot={false}
+            activeDot={false}
+            isAnimationActive={false}
+          />
+          <Area
+            type="monotone"
+            dataKey="conf_band"
+            stroke="none"
+            fill="hsl(160, 70%, 45%)"
+            fillOpacity={0.12}
+            stackId="conf"
+            legendType="none"
+            dot={false}
+            activeDot={false}
+            isAnimationActive={false}
           />
           <Area
             type="monotone"

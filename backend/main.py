@@ -162,82 +162,90 @@ _MIN_HIST = max(_LAGS + _WINDOWS)  # 60 — minimum history needed
 
 
 def _build_row(prices: np.ndarray, i: int, use_vol: bool, volumes: np.ndarray) -> list:
-    """Build one feature row at position i (i >= _MIN_HIST)."""
+    """Build one feature row at position i (i >= _MIN_HIST).
+
+    All price-based features are NORMALISED relative to prices[i-1] so the
+    model learns patterns in relative terms (scale-invariant).  This means a
+    model trained while the stock was at $100 generalises correctly when the
+    stock is at $200 — something raw-price features cannot achieve.
+    """
     row = []
-    # Lag prices
+    cur = prices[i - 1]  # most recent known close
+
+    # Normalised lag prices  (relative distance from current price)
     for lag in _LAGS:
-        row.append(prices[i - lag])
-    # Log momentum
+        row.append(prices[i - lag] / cur - 1.0 if cur > 0 else 0.0)
+
+    # Log momentum (unchanged — already relative)
     for lag in [1, 5, 10, 20]:
         prev = prices[i - lag - 1] if (i - lag - 1) >= 0 else prices[0]
         row.append(np.log(prices[i - 1] / prev) if prev > 0 else 0.0)
-    # Rolling mean
+
+    # Rolling mean (normalised)
     for w in _WINDOWS:
-        row.append(float(np.mean(prices[i - w : i])))
-    # Rolling volatility
+        mean_w = float(np.mean(prices[i - w : i]))
+        row.append(mean_w / cur - 1.0 if cur > 0 else 0.0)
+
+    # Rolling volatility (normalised — coefficient of variation)
     for w in [5, 20, 50]:
-        row.append(float(np.std(prices[max(0, i - w) : i])))
-    # Momentum (% change)
+        row.append(float(np.std(prices[max(0, i - w) : i])) / cur if cur > 0 else 0.0)
+
+    # Momentum / % change (unchanged — already relative)
     for p in [5, 10, 20, 30]:
         base = prices[i - p - 1] if (i - p - 1) >= 0 else prices[0]
         row.append(prices[i - 1] / base - 1.0 if base > 0 else 0.0)
-    # Volume features
+
+    # Volume features (normalised relative to 20-day average)
     if use_vol:
-        row.append(float(volumes[i - 1]))
-        row.append(float(np.mean(volumes[max(0, i - 20) : i])))
+        mean_20v = float(np.mean(volumes[max(0, i - 20) : i]))
+        mean_5v  = float(np.mean(volumes[max(0, i - 5)  : i]))
+        row.append(volumes[i - 1] / mean_20v - 1.0 if mean_20v > 0 else 0.0)
+        row.append(mean_5v / mean_20v - 1.0          if mean_20v > 0 else 0.0)
+
     return row
 
 
 def _make_features(prices: np.ndarray, volumes: np.ndarray):
-    """Create (X, y) from the price/volume arrays. y = prices[_MIN_HIST:]."""
+    """Create (X, y).
+
+    Target y is the **log-return** for each day (more stationary than raw price).
+    Predicting log-returns forces the model to learn how much the price *moves*
+    rather than what the price *is*, which generalises far better out-of-sample.
+    """
     use_vol = len(volumes) == len(prices)
     rows = [_build_row(prices, i, use_vol, volumes) for i in range(_MIN_HIST, len(prices))]
-    return np.array(rows, dtype=np.float64), prices[_MIN_HIST:].astype(np.float64)
+    base = np.maximum(prices[_MIN_HIST - 1 : -1], 1e-8)
+    log_returns = np.log(np.maximum(prices[_MIN_HIST:], 1e-8) / base)
+    return np.array(rows, dtype=np.float64), log_returns.astype(np.float64)
 
 
 def _recursive_forecast(model: GradientBoostingRegressor,
                          prices: np.ndarray, volumes: np.ndarray,
                          forecast_days: int) -> list[float]:
-    """Recursively predict future prices, blending GBM (short-term) with a
-    log-linear trend extrapolation (long-term) so predictions don't mean-revert
-    on long horizons.
+    """Recursively predict future prices using log-return predictions.
 
-    Blend weight for GBM decays as exp(-t / tau):
-      t=0  → 100% GBM   (pure momentum/pattern model)
-      t=45 →  37% GBM   (equal weight around ~6 weeks)
-      t=90 →  14% GBM   (trend takes over ~3 months out)
+    Because the model predicts log-returns (not raw prices) the feature window
+    stays in the normalised domain regardless of how far prices drift — there is
+    no need for an explicit trend-extrapolation anchor.
     """
     use_vol = len(volumes) == len(prices)
     buf     = list(prices[-_MIN_HIST:])
     vbuf    = list(volumes[-_MIN_HIST:]) if use_vol else []
 
-    # Fit log-linear trend on last 90 days of actual prices for long-horizon anchor
-    lookback = min(90, len(prices))
-    recent   = np.log(prices[-lookback:])
-    x_fit    = np.arange(lookback, dtype=np.float64)
-    slope, _ = np.polyfit(x_fit, recent, 1)   # daily log-return drift (intercept unused)
-    last_log  = np.log(max(prices[-1], 1e-6))
-    tau = 45.0  # e-folding time in days — tune higher to trust GBM longer
-
-    raw_preds   = []
-    vol_arr     = np.array([])
-    for t in range(forecast_days):
+    raw_preds = []
+    vol_arr   = np.array([])
+    for _ in range(forecast_days):
         b = np.array(buf)
         if use_vol:
             vol_arr = np.array(vbuf)
-        row  = _build_row(b, len(b), use_vol, vol_arr)
-        gbm  = max(float(model.predict(np.array([row]))[0]), 0.01)
+        row     = _build_row(b, len(b), use_vol, vol_arr)
+        log_ret = float(model.predict(np.array([row]))[0])
 
-        # Trend anchor: exponential extrapolation from last real price
-        trend = float(np.exp(last_log + slope * (t + 1)))
-        trend = max(trend, 0.01)
+        # Convert predicted log-return back to price
+        next_price = max(buf[-1] * np.exp(log_ret), 0.01)
+        raw_preds.append(next_price)
 
-        # Smooth blend: GBM weight decays, trend weight grows
-        alpha = float(np.exp(-t / tau))
-        pred  = alpha * gbm + (1.0 - alpha) * trend
-
-        raw_preds.append(max(pred, 0.01))
-        buf.append(gbm)   # feed raw GBM into the next step's feature window
+        buf.append(next_price)
         buf = buf[1:]
         if use_vol:
             vbuf.append(vbuf[-1])
@@ -360,27 +368,53 @@ def forecast(request: Request, req: ForecastRequest):
         dates   = data["ds"]
         volumes = ohlcv["volume"].values.astype(np.float64)
 
-        # 1. Build feature matrix
+        # 1. Build feature matrix (normalised features, log-return targets)
         X, y_true = _make_features(prices, volumes)
 
-        # 2. Train Gradient Boosting model
-        model = GradientBoostingRegressor(
-            n_estimators=300,
-            learning_rate=0.05,
-            max_depth=4,
-            subsample=0.8,
-            min_samples_leaf=5,
-            random_state=42,
-        )
+        def _make_gbm() -> GradientBoostingRegressor:
+            return GradientBoostingRegressor(
+                n_estimators=300,
+                learning_rate=0.05,
+                max_depth=4,
+                subsample=0.8,
+                min_samples_leaf=5,
+                random_state=42,
+            )
+
+        # 2. Out-of-sample metrics via a proper train / validation split.
+        #    We evaluate on the HELD-OUT last 20 % of rows so the reported
+        #    numbers reflect genuine future-prediction performance, not overfitting.
+        val_size   = max(20, int(0.2 * len(X)))
+        X_train, X_val = X[:-val_size], X[-val_size:]
+        y_train, y_val = y_true[:-val_size], y_true[-val_size:]
+
+        model_val = _make_gbm()
+        model_val.fit(X_train, y_train)
+
+        val_pred_returns = model_val.predict(X_val)
+
+        # Convert log-return predictions → price predictions for human-readable metrics
+        val_start_idx      = _MIN_HIST + (len(X) - val_size)
+        val_prices_actual  = prices[val_start_idx:]
+        val_prices_base    = prices[val_start_idx - 1 : -1]
+        val_prices_pred    = val_prices_base * np.exp(val_pred_returns)
+
+        r2   = float(r2_score(val_prices_actual, val_prices_pred))
+        mae  = float(mean_absolute_error(val_prices_actual, val_prices_pred))
+        mape = float(mean_absolute_percentage_error(val_prices_actual, val_prices_pred) * 100)
+
+        # Daily prediction-error volatility — drives the confidence-interval width
+        log_errors = np.log(np.maximum(val_prices_pred, 1e-8) / np.maximum(val_prices_actual, 1e-8))
+        daily_vol  = float(np.std(log_errors)) if len(log_errors) >= 5 else float(np.std(y_true))
+
+        # 3. Final model trained on ALL data for the actual forecast
+        model = _make_gbm()
         model.fit(X, y_true)
 
-        # 3. In-sample predictions
-        hist_pred_aligned = model.predict(X)
-
-        # 4. Metrics (1-step-ahead in-sample)
-        r2   = float(r2_score(y_true, hist_pred_aligned))
-        mae  = float(mean_absolute_error(y_true, hist_pred_aligned))
-        mape = float(mean_absolute_percentage_error(y_true, hist_pred_aligned) * 100)
+        # 4. In-sample price predictions (for the historical overlay on the chart)
+        hist_pred_returns  = model.predict(X)
+        hist_prices_base   = prices[_MIN_HIST - 1 : -1]
+        hist_pred_aligned  = hist_prices_base * np.exp(hist_pred_returns)
 
         last_price = float(prices[-1])
 
@@ -393,7 +427,19 @@ def forecast(request: Request, req: ForecastRequest):
         future_values = _recursive_forecast(model, prices, volumes, req.forecast_days)
         end_price     = future_values[-1]
 
-        # 6. Full historic_pred — first _MIN_HIST entries have no prediction → None
+        # 6. Confidence intervals: uncertainty grows as ±1.96·σ·√t (random-walk scaling).
+        #    This produces the realistic "cone of uncertainty" — narrow near the start,
+        #    widening as the horizon extends.
+        conf_low  = [
+            max(v * np.exp(-1.96 * daily_vol * np.sqrt(t + 1)), 0.01)
+            for t, v in enumerate(future_values)
+        ]
+        conf_high = [
+            float(v * np.exp(1.96 * daily_vol * np.sqrt(t + 1)))
+            for t, v in enumerate(future_values)
+        ]
+
+        # 7. Full historic_pred — first _MIN_HIST entries have no prediction → None
         hist_pred_full = [None] * _MIN_HIST + [round(float(v), 4) for v in hist_pred_aligned]
 
         return {
@@ -411,8 +457,10 @@ def forecast(request: Request, req: ForecastRequest):
                 "values": hist_pred_full,
             },
             "future_pred": {
-                "dates":  [d.strftime("%Y-%m-%d") for d in future_dates],
-                "values": [round(float(v), 4) for v in future_values],
+                "dates":    [d.strftime("%Y-%m-%d") for d in future_dates],
+                "values":   [round(float(v), 4) for v in future_values],
+                "conf_low": [round(float(v), 4) for v in conf_low],
+                "conf_high":[round(float(v), 4) for v in conf_high],
             },
             "ohlcv": {
                 "dates":  ohlcv["ds"].dt.strftime("%Y-%m-%d").tolist(),
