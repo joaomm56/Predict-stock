@@ -1,0 +1,14 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+RUN wget -O /tmp/oneagent.sh \
+  "https://SEU_TENANT.live.dynatrace.com/api/v1/deployment/installer/agent/unix/default/latest?Api-Token=SEU_API_TOKEN" \
+  && sh /tmp/oneagent.sh --set-app-log-content-access=true
+
+COPY . .
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
