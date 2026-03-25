@@ -9,7 +9,7 @@ COPY . .
 
 # Script de arranque que instala o agente e depois inicia a app
 CMD ["/bin/sh", "-c", "\
-  wget -O /tmp/oneagent.sh \
+  curl -o /tmp/oneagent.sh \
   \"https://${DT_TENANT}.live.dynatrace.com/api/v1/deployment/installer/agent/unix/default/latest?Api-Token=${DT_API_TOKEN}\" \
   && sh /tmp/oneagent.sh --set-app-log-content-access=true \
   && uvicorn main:app --host 0.0.0.0 --port 8000"]
