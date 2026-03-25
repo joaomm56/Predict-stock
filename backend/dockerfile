@@ -1,17 +1,19 @@
 FROM python:3.11-slim
 
+ARG DT_TENANT
+ARG DT_API_TOKEN
+
 WORKDIR /app
 
-# Instalar curl uma vez durante o build
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
+
+RUN curl -o /tmp/oneagent.sh \
+  "https://${DT_TENANT}.live.dynatrace.com/api/v1/deployment/installer/agent/unix/default/latest?Api-Token=${DT_API_TOKEN}" \
+  && sh /tmp/oneagent.sh --set-app-log-content-access=true --install-silent || true
 
 COPY /backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-CMD ["/bin/sh", "-c", "\
-  curl -o /tmp/oneagent.sh \
-  \"https://${DT_TENANT}.live.dynatrace.com/api/v1/deployment/installer/agent/unix/default/latest?Api-Token=${DT_API_TOKEN}\" \
-  && sh /tmp/oneagent.sh --set-app-log-content-access=true --install-silent || true \
-  && uvicorn backend.main:app --host 0.0.0.0 --port 8000"]
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
