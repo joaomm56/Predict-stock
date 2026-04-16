@@ -16,3 +16,9 @@ opentelemetry-sdk
 opentelemetry-exporter-otlp-proto-http
 opentelemetry-instrumentation-fastapi
 opentelemetry-instrumentation-httpx
+prometheus-fastapi-instrumentator
+prometheus-client
+structlog
+python-json-logger
+opentelemetry-exporter-otlp-proto-grpc
+ 

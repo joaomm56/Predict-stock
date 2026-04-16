@@ -26,13 +26,21 @@ from cachetools import TTLCache, cached
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.metrics import r2_score, mean_absolute_error, mean_absolute_percentage_error
 
-# ── Observability ──────────────────────────────────────────────────────────────
-from prometheus_fastapi_instrumentator import Instrumentator
-from prometheus_client import Counter, Gauge, Histogram
-import structlog
-import logging
-from pythonjsonlogger import jsonlogger
+# ── Observabilidade ────────────────────────────────────────────────────────────
+from observability import setup_observability
+from observability.metrics import (
+    forecast_requests_total,
+    forecast_latency,
+    model_mae,
+    model_mape,
+    model_r2,
+    quota_hits_total,
+)
+from observability.logging import get_logger
 
+logger = get_logger()
+
+# ── Configuração ───────────────────────────────────────────────────────────────
 stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "").strip()
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
 
@@ -47,58 +55,6 @@ if _sentry_dsn:
         integrations=[StarletteIntegration(), FastApiIntegration()],
         traces_sample_rate=0.1,
     )
-
-# ── Logger estruturado (JSON → Loki) ──────────────────────────────────────────
-_log_handler = logging.StreamHandler()
-_log_handler.setFormatter(jsonlogger.JsonFormatter(
-    "%(asctime)s %(levelname)s %(name)s %(message)s"
-))
-logging.basicConfig(handlers=[_log_handler], level=logging.INFO)
-logger = structlog.get_logger()
-
-# ── Métricas Prometheus ────────────────────────────────────────────────────────
-# IMPORTANTE: definidas AQUI, antes de qualquer uso (check_and_increment_quota, forecast)
-forecast_requests_total = Counter(
-    "predict_stock_forecast_total",
-    "Total de forecasts realizados",
-    ["ticker", "plan", "model_type"]
-)
-
-forecast_latency = Histogram(
-    "predict_stock_forecast_duration_seconds",
-    "Tempo de inferência do modelo por ticker",
-    ["ticker"],
-    buckets=[0.5, 1, 2, 5, 10, 20, 30, 60]
-)
-
-model_mae = Gauge(
-    "predict_stock_model_mae",
-    "Mean Absolute Error do modelo (última previsão)",
-    ["ticker"]
-)
-
-model_mape = Gauge(
-    "predict_stock_model_mape",
-    "Mean Absolute Percentage Error do modelo (%)",
-    ["ticker"]
-)
-
-model_r2 = Gauge(
-    "predict_stock_model_r2",
-    "R² score do modelo (última previsão)",
-    ["ticker"]
-)
-
-quota_hits_total = Counter(
-    "predict_stock_quota_exceeded_total",
-    "Total de vezes que o limite diário foi atingido"
-)
-
-cache_hits_total = Counter(
-    "predict_stock_cache_hits_total",
-    "Cache hits no yfinance",
-    ["cache_type"]
-)
 
 # ── yfinance cache ─────────────────────────────────────────────────────────────
 _info_lock  = threading.Lock()
@@ -125,6 +81,7 @@ def _cached_stock_fetch(ticker: str, start: str, end: str):
     tk = yf.Ticker(ticker)
     return tk.history(start=start, end=end).copy(), tk.info
 
+
 PRICE_IDS = {
     "pro":     "price_1T8rsURNJEKtZi6YDft6rnbu",
     "premium": "price_1T8rsrRNJEKtZi6YYKE6RHVj",
@@ -138,14 +95,13 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL, "http://localhost:5173", "http://localhost:3000"],
+    allow_origins=[FRONTEND_URL, "http://localhost:5173", "http://localhost:3000", "http://localhost:8081"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ── Prometheus automático (latência, erros, requests por endpoint) ─────────────
-# Logo após o middleware, antes dos routes
-Instrumentator().instrument(app).expose(app)
+# ── Inicializa observabilidade (métricas, logs, traces) ────────────────────────
+setup_observability(app)
 
 
 @app.exception_handler(Exception)
@@ -186,7 +142,7 @@ def check_and_increment_quota(token: str) -> str:
         quota_count = int(meta.get("quota_count", 0)) if quota_date == today else 0
 
         if quota_count >= FREE_FORECASTS_PER_DAY:
-            quota_hits_total.inc()  # ← métrica de limite atingido
+            quota_hits_total.inc()
             raise HTTPException(
                 status_code=429,
                 detail=f"Daily forecast limit reached ({FREE_FORECASTS_PER_DAY}/day). Upgrade to Pro for unlimited forecasts."
@@ -379,10 +335,7 @@ def _make_features(prices: np.ndarray, volumes: np.ndarray):
     return X, log_returns.astype(np.float64)
 
 
-def _recursive_forecast(model: GradientBoostingRegressor,
-                         prices: np.ndarray, volumes: np.ndarray,
-                         forecast_days: int,
-                         return_bias: float = 0.0) -> list[float]:
+def _recursive_forecast(model, prices, volumes, forecast_days, return_bias=0.0):
     hist_log_rets = np.diff(np.log(np.maximum(prices[-252:], 1e-8)))
     if len(hist_log_rets) >= 10:
         cap_99 = float(np.percentile(np.abs(hist_log_rets), 99))
@@ -403,13 +356,10 @@ def _recursive_forecast(model: GradientBoostingRegressor,
             vol_arr = np.array(vbuf)
         row     = _build_row(b, len(b), use_vol, vol_arr)
         log_ret = float(model.predict(np.array([row]))[0])
-
         log_ret -= return_bias
         log_ret  = float(np.clip(log_ret, -_MAX_DAILY_LOG_RET, _MAX_DAILY_LOG_RET))
-
         next_price = max(buf[-1] * np.exp(log_ret), 0.01)
         raw_preds.append(next_price)
-
         buf.append(next_price)
         buf = buf[1:]
         if use_vol:
@@ -422,38 +372,33 @@ def _recursive_forecast(model: GradientBoostingRegressor,
 _DIRECT_HORIZONS = [5, 10, 20, 30, 60, 90, 180, 365, 730]
 
 
-def _make_features_direct(prices: np.ndarray, volumes: np.ndarray, horizon: int):
+def _make_features_direct(prices, volumes, horizon):
     n = len(prices)
     n_rows_full = n - _MIN_HIST - horizon + 1
     if n_rows_full < 20:
         return None, None
     n_rows = min(n_rows_full, _MAX_TRAIN_ROWS)
     start  = _MIN_HIST + (n_rows_full - n_rows)
-
     X      = _build_feature_matrix(prices, volumes, n_rows, start)
     base   = np.maximum(prices[start - 1           : start - 1 + n_rows], 1e-8)
     future = np.maximum(prices[start - 1 + horizon : start - 1 + horizon + n_rows], 1e-8)
-    log_returns_h = np.log(future / base)
-    return X, log_returns_h.astype(np.float64)
+    return X, np.log(future / base).astype(np.float64)
 
 
-def _direct_forecast(prices: np.ndarray, volumes: np.ndarray,
-                     forecast_days: int,
-                     model_map: dict) -> list:
+def _direct_forecast(prices, volumes, forecast_days, model_map):
     use_vol = len(volumes) == len(prices)
     vol_arr = volumes if use_vol else np.array([])
     row = _build_row(prices, len(prices), use_vol, vol_arr)
     last_price = float(prices[-1])
 
-    anchor_log_rets: dict[int, float] = {}
+    anchor_log_rets = {}
     for h, m in sorted(model_map.items()):
         lr = float(m.predict([row])[0])
         cap = np.log(1.05) * h
         anchor_log_rets[h] = float(np.clip(lr, -cap, cap))
 
     anchor_list = sorted(anchor_log_rets.keys())
-
-    result: list[float] = []
+    result = []
     for t in range(1, forecast_days + 1):
         if t in anchor_log_rets:
             log_ret = anchor_log_rets[t]
@@ -464,14 +409,12 @@ def _direct_forecast(prices: np.ndarray, volumes: np.ndarray,
             h_last = anchor_list[-1]
             daily_rate = anchor_log_rets[h_last] / h_last
             raw = anchor_log_rets[h_last] + daily_rate * (t - h_last)
-            cap = np.log(1.05) * t
-            log_ret = float(np.clip(raw, -cap, cap))
+            log_ret = float(np.clip(raw, -np.log(1.05) * t, np.log(1.05) * t))
         else:
             h_lo = max(h for h in anchor_list if h <= t)
             h_hi = min(h for h in anchor_list if h >= t)
             frac = (t - h_lo) / (h_hi - h_lo)
             log_ret = anchor_log_rets[h_lo] + frac * (anchor_log_rets[h_hi] - anchor_log_rets[h_lo])
-
         result.append(max(last_price * np.exp(log_ret), 0.01))
 
     return result
@@ -537,10 +480,7 @@ def history(request: Request, ticker: str, period: str = "1y"):
         hist = hist.copy()
         hist.index = hist.index.tz_localize(None)
 
-        if period in ("1mo", "3mo"):
-            series = hist["Close"].resample("W").last().dropna()
-            fmt = "%d %b"
-        elif period in ("6mo",):
+        if period in ("1mo", "3mo", "6mo"):
             series = hist["Close"].resample("W").last().dropna()
             fmt = "%d %b"
         elif period in ("1y", "2y"):
@@ -586,28 +526,22 @@ def forecast(request: Request, req: ForecastRequest):
         dates   = data["ds"]
         volumes = ohlcv["volume"].values.astype(np.float64)
 
-        # ── Timer só envolve a inferência do modelo ────────────────────────────
         with forecast_latency.labels(ticker=ticker).time():
             X, y_true = _make_features(prices, volumes)
             train_start = len(prices) - len(X)
 
-            def _make_gbm() -> GradientBoostingRegressor:
+            def _make_gbm():
                 return GradientBoostingRegressor(
-                    n_estimators=300,
-                    learning_rate=0.05,
-                    max_depth=4,
-                    subsample=0.8,
-                    min_samples_leaf=5,
-                    random_state=42,
+                    n_estimators=300, learning_rate=0.05, max_depth=4,
+                    subsample=0.8, min_samples_leaf=5, random_state=42,
                 )
 
-            val_size   = max(20, int(0.2 * len(X)))
+            val_size = max(20, int(0.2 * len(X)))
             X_train, X_val = X[:-val_size], X[-val_size:]
             y_train, y_val = y_true[:-val_size], y_true[-val_size:]
 
             model_val = _make_gbm()
             model_val.fit(X_train, y_train)
-
             val_pred_returns = model_val.predict(X_val)
 
             val_start_idx     = train_start + (len(X) - val_size)
@@ -623,8 +557,7 @@ def forecast(request: Request, req: ForecastRequest):
             pred_err_vol = float(np.std(log_errors)) if len(log_errors) >= 5 else float(np.std(y_true))
             realized_vol = float(np.std(y_true[-min(252, len(y_true)):]))
             daily_vol    = max(pred_err_vol, realized_vol)
-
-            return_bias = float(np.mean(val_pred_returns - y_val))
+            return_bias  = float(np.mean(val_pred_returns - y_val))
 
             _ens_models = []
             for _seed in [42, 7, 13]:
@@ -639,8 +572,7 @@ def forecast(request: Request, req: ForecastRequest):
             hist_pred_returns = model.predict(X)
             hist_prices_base  = prices[train_start - 1 : train_start - 1 + len(X)]
             hist_pred_aligned = hist_prices_base * np.exp(hist_pred_returns)
-
-            last_price = float(prices[-1])
+            last_price        = float(prices[-1])
 
             last_date    = pd.Timestamp(dates.iloc[-1])
             future_dates = pd.bdate_range(
@@ -648,19 +580,15 @@ def forecast(request: Request, req: ForecastRequest):
                 periods=req.forecast_days,
             )
 
-            def _make_direct_gbm() -> GradientBoostingRegressor:
+            def _make_direct_gbm():
                 return GradientBoostingRegressor(
-                    n_estimators=200,
-                    learning_rate=0.05,
-                    max_depth=4,
-                    subsample=0.8,
-                    min_samples_leaf=5,
-                    random_state=42,
+                    n_estimators=200, learning_rate=0.05, max_depth=4,
+                    subsample=0.8, min_samples_leaf=5, random_state=42,
                 )
 
             used_direct = False
             if user_plan in ("pro", "premium"):
-                direct_models: dict = {}
+                direct_models = {}
                 for h in _DIRECT_HORIZONS:
                     if h > req.forecast_days:
                         continue
@@ -669,7 +597,6 @@ def forecast(request: Request, req: ForecastRequest):
                         m_h = _make_direct_gbm()
                         m_h.fit(X_h, y_h)
                         direct_models[h] = m_h
-
                 if direct_models:
                     future_values = _direct_forecast(prices, volumes, req.forecast_days, direct_models)
                     used_direct = True
@@ -680,18 +607,11 @@ def forecast(request: Request, req: ForecastRequest):
 
             end_price = future_values[-1]
 
-            conf_low  = [
-                max(v * np.exp(-1.96 * daily_vol * np.sqrt(t + 1)), 0.01)
-                for t, v in enumerate(future_values)
-            ]
-            conf_high = [
-                float(v * np.exp(1.96 * daily_vol * np.sqrt(t + 1)))
-                for t, v in enumerate(future_values)
-            ]
-
+            conf_low  = [max(v * np.exp(-1.96 * daily_vol * np.sqrt(t + 1)), 0.01) for t, v in enumerate(future_values)]
+            conf_high = [float(v * np.exp(1.96 * daily_vol * np.sqrt(t + 1))) for t, v in enumerate(future_values)]
             hist_pred_full = [None] * train_start + [round(float(v), 4) for v in hist_pred_aligned]
 
-        # ── Fora do with — métricas registadas após o timer ───────────────────
+        # ── Regista métricas e logs após inferência ────────────────────────────
         forecast_requests_total.labels(
             ticker=ticker,
             plan=user_plan,
