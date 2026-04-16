@@ -25,6 +25,7 @@ dist-ssr
 
 .env
 .env.*.local
+.env.production
 
 # Python
 backend/__pycache__/
