@@ -1,8 +1,9 @@
 import os
+from urllib.parse import unquote
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter  # ← HTTP
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
@@ -13,13 +14,13 @@ def setup_tracing(app):
         "http://localhost:4319"
     )
     headers_str = os.getenv("OTEL_EXPORTER_OTLP_HEADERS", "")
-    
+
     headers = {}
     if headers_str:
         for part in headers_str.split(","):
             if "=" in part:
                 k, v = part.split("=", 1)
-                headers[k.strip()] = v.strip()
+                headers[k.strip()] = unquote(v.strip())
 
     resource = Resource.create({"service.name": "predict-stock-api"})
     provider = TracerProvider(resource=resource)
