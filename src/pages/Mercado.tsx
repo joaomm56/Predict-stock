@@ -10,6 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { supabase } from "@/lib/supabase";
 import { usePlan } from "@/hooks/usePlan";
+import { fetchWithDelay } from "@/lib/utils";
 
 const INDEX_TICKERS = [
   { ticker: "^GSPC",  label: "S&P 500"   },
@@ -99,24 +100,31 @@ const Mercado = () => {
   };
 
   const fetchAll = async () => {
-    setLoading(true);
-    const [indexResults, stockResults] = await Promise.all([
-      Promise.allSettled(INDEX_TICKERS.map((i) => getStockInfo(i.ticker))),
-      Promise.allSettled(STOCK_TICKERS.map((t) => getStockInfo(t))),
-    ]);
-    setIndices(INDEX_TICKERS.map((item, i) => ({
-      ticker: item.ticker, label: item.label,
-      info: indexResults[i].status === "fulfilled" ? indexResults[i].value : null,
-      error: indexResults[i].status === "rejected",
-    })));
-    setStocks(STOCK_TICKERS.map((ticker, i) => ({
-      ticker, label: ticker,
-      info: stockResults[i].status === "fulfilled" ? stockResults[i].value : null,
-      error: stockResults[i].status === "rejected",
-    })));
-    setLastUpdated(new Date());
-    setLoading(false);
-  };
+  setLoading(true);
+  const allTickers = [
+    ...INDEX_TICKERS.map((i) => ({ ticker: i.ticker, label: i.label, isIndex: true })),
+    ...STOCK_TICKERS.map((t) => ({ ticker: t, label: t, isIndex: false })),
+  ];
+
+  const results = await fetchWithDelay(
+    allTickers.map((item) => () => getStockInfo(item.ticker)),
+    300  // 300ms entre cada request
+  );
+
+  const indexCount = INDEX_TICKERS.length;
+  setIndices(INDEX_TICKERS.map((item, i) => ({
+    ticker: item.ticker, label: item.label,
+    info: results[i].status === "fulfilled" ? results[i].value : null,
+    error: results[i].status === "rejected",
+  })));
+  setStocks(STOCK_TICKERS.map((ticker, i) => ({
+    ticker, label: ticker,
+    info: results[indexCount + i].status === "fulfilled" ? results[indexCount + i].value : null,
+    error: results[indexCount + i].status === "rejected",
+  })));
+  setLastUpdated(new Date());
+  setLoading(false);
+};
 
   const loadTickerData = async (ticker: string, period: string) => {
     setChartLoading(true);
