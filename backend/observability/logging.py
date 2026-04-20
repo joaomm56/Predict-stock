@@ -21,6 +21,8 @@ def setup_logging():
 
     endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4320")
     headers_str = os.getenv("OTEL_EXPORTER_OTLP_HEADERS", "")
+    print(f"[OTEL LOGS] Endpoint: {endpoint}")
+    print(f"[OTEL LOGS] Headers present: {bool(headers_str)}")
 
     headers = {}
     if headers_str:
