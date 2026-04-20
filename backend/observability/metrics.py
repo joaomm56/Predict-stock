@@ -1,7 +1,16 @@
+import os
+from urllib.parse import unquote
 from prometheus_fastapi_instrumentator import Instrumentator
 from prometheus_client import Counter, Gauge, Histogram
 
-# ── Métricas de forecast ───────────────────────────────────────────────────────
+# ── OTEL Metrics Push (para Grafana Cloud) ─────────────────────────────────────
+from opentelemetry import metrics
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+from opentelemetry.sdk.resources import Resource
+
+# ── Prometheus metrics (pull local) ────────────────────────────────────────────
 forecast_requests_total = Counter(
     "predict_stock_forecast_total",
     "Total de forecasts realizados",
@@ -15,7 +24,6 @@ forecast_latency = Histogram(
     buckets=[0.5, 1, 2, 5, 10, 20, 30, 60]
 )
 
-# ── Métricas de qualidade do modelo ───────────────────────────────────────────
 model_mae = Gauge(
     "predict_stock_model_mae",
     "Mean Absolute Error do modelo (última previsão)",
@@ -34,7 +42,6 @@ model_r2 = Gauge(
     ["ticker"]
 )
 
-# ── Métricas de quota e cache ─────────────────────────────────────────────────
 quota_hits_total = Counter(
     "predict_stock_quota_exceeded_total",
     "Total de vezes que o limite diário foi atingido"
@@ -46,7 +53,41 @@ cache_hits_total = Counter(
     ["cache_type"]
 )
 
+# ── OTEL Meter (para push ao Grafana Cloud) ───────────────────────────────────
+_meter = None
+
+def get_meter():
+    global _meter
+    return _meter
+
 
 def setup_metrics(app):
-    """Liga o Instrumentator ao app FastAPI e expõe o endpoint /metrics."""
+    """Liga Prometheus pull + OTEL push para Grafana Cloud."""
+    global _meter
+
+    # Prometheus automático (pull local)
     Instrumentator().instrument(app).expose(app)
+
+    # OTEL push (Grafana Cloud)
+    endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+    headers_str = os.getenv("OTEL_EXPORTER_OTLP_HEADERS", "")
+
+    if endpoint and headers_str:
+        headers = {}
+        for part in headers_str.split(","):
+            if "=" in part:
+                k, v = part.split("=", 1)
+                headers[k.strip()] = unquote(v.strip())
+
+        resource = Resource.create({"service.name": "predict-stock-api"})
+        exporter = OTLPMetricExporter(
+            endpoint=f"{endpoint}/v1/metrics",
+            headers=headers
+        )
+        reader = PeriodicExportingMetricReader(exporter, export_interval_millis=30000)
+        provider = MeterProvider(resource=resource, metric_readers=[reader])
+        metrics.set_meter_provider(provider)
+        _meter = metrics.get_meter("predict-stock")
+        print("[OTEL METRICS] Push configurado para Grafana Cloud")
+    else:
+        print("[OTEL METRICS] Sem endpoint, apenas Prometheus local")
