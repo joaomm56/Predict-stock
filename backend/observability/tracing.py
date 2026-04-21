@@ -23,19 +23,20 @@ def setup_tracing(app):
     provider = TracerProvider(resource=resource)
 
     # ── Grafana Cloud ──────────────────────────────────────────
-    endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4320")
-    headers_str = os.getenv("OTEL_EXPORTER_OTLP_HEADERS", "")
-    headers = _parse_headers(headers_str)
-
-    grafana_exporter = OTLPSpanExporter(
-        endpoint=f"{endpoint}/v1/traces",
-        headers=headers
-    )
-    provider.add_span_processor(BatchSpanProcessor(grafana_exporter))
+    endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "").strip()
+    headers_str = os.getenv("OTEL_EXPORTER_OTLP_HEADERS", "").strip()
+    if endpoint and headers_str:
+        headers = _parse_headers(headers_str)
+        grafana_exporter = OTLPSpanExporter(
+            endpoint=f"{endpoint}/v1/traces",
+            headers=headers
+        )
+        provider.add_span_processor(BatchSpanProcessor(grafana_exporter))
+        print("[OTEL TRACES] Grafana Cloud configurado")
 
     # ── Dynatrace ──────────────────────────────────────────────
-    dt_endpoint = os.getenv("DT_OTEL_ENDPOINT", "")
-    dt_token = os.getenv("DT_OTEL_TOKEN", "")
+    dt_endpoint = os.getenv("DT_OTEL_ENDPOINT", "").strip()
+    dt_token = os.getenv("DT_OTEL_TOKEN", "").strip()
     if dt_endpoint and dt_token:
         dt_exporter = OTLPSpanExporter(
             endpoint=f"{dt_endpoint}/v1/traces",
