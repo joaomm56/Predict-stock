@@ -62,7 +62,7 @@ def get_meter():
 
 
 def setup_metrics(app):
-    """Liga Prometheus pull + OTEL push para Grafana Cloud."""
+    """Liga Prometheus pull + OTEL push para Grafana Cloud e Dynatrace."""
     global _meter
 
     # Prometheus automático (pull local)
@@ -80,14 +80,30 @@ def setup_metrics(app):
                 headers[k.strip()] = unquote(v.strip())
 
         resource = Resource.create({"service.name": "predict-stock-api"})
-        exporter = OTLPMetricExporter(
+        
+        readers = []
+        
+        # Grafana Cloud reader
+        grafana_exporter = OTLPMetricExporter(
             endpoint=f"{endpoint}/v1/metrics",
             headers=headers
         )
-        reader = PeriodicExportingMetricReader(exporter, export_interval_millis=30000)
-        provider = MeterProvider(resource=resource, metric_readers=[reader])
+        readers.append(PeriodicExportingMetricReader(grafana_exporter, export_interval_millis=30000))
+        print("[OTEL METRICS] Push configurado para Grafana Cloud")
+
+        # Dynatrace reader
+        dt_endpoint = os.getenv("DT_OTEL_ENDPOINT", "")
+        dt_token = os.getenv("DT_OTEL_TOKEN", "")
+        if dt_endpoint and dt_token:
+            dt_exporter = OTLPMetricExporter(
+                endpoint=f"{dt_endpoint}/v1/metrics",
+                headers={"Authorization": f"Api-Token {dt_token}"}
+            )
+            readers.append(PeriodicExportingMetricReader(dt_exporter, export_interval_millis=30000))
+            print("[OTEL METRICS] Dynatrace configurado")
+
+        provider = MeterProvider(resource=resource, metric_readers=readers)
         metrics.set_meter_provider(provider)
         _meter = metrics.get_meter("predict-stock")
-        print("[OTEL METRICS] Push configurado para Grafana Cloud")
     else:
         print("[OTEL METRICS] Sem endpoint, apenas Prometheus local")
