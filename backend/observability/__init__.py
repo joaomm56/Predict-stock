@@ -1,12 +1,10 @@
 from .metrics import (
     setup_metrics,
-    forecast_requests_total,
+    record_forecast,
+    record_model_quality,
+    record_quota_hit,
+    record_cache_hit,
     forecast_latency,
-    model_mae,
-    model_mape,
-    model_r2,
-    quota_hits_total,
-    cache_hits_total,
 )
 from .logging import setup_logging, get_logger
 from .tracing import setup_tracing

@@ -29,12 +29,10 @@ from sklearn.metrics import r2_score, mean_absolute_error, mean_absolute_percent
 # ── Observabilidade ────────────────────────────────────────────────────────────
 from observability import setup_observability
 from observability.metrics import (
-    forecast_requests_total,
-    forecast_latency,
-    model_mae,
-    model_mape,
-    model_r2,
-    quota_hits_total,
+    record_forecast,
+    record_model_quality,
+    record_quota_hit,
+    forecast_latency,  # manter só para o context manager .time()
 )
 from observability.logging import get_logger
 
@@ -142,7 +140,7 @@ def check_and_increment_quota(token: str) -> str:
         quota_count = int(meta.get("quota_count", 0)) if quota_date == today else 0
 
         if quota_count >= FREE_FORECASTS_PER_DAY:
-            quota_hits_total.inc()
+            record_quota_hit()
             raise HTTPException(
                 status_code=429,
                 detail=f"Daily forecast limit reached ({FREE_FORECASTS_PER_DAY}/day). Upgrade to Pro for unlimited forecasts."
@@ -612,28 +610,13 @@ def forecast(request: Request, req: ForecastRequest):
             hist_pred_full = [None] * train_start + [round(float(v), 4) for v in hist_pred_aligned]
 
         # ── Regista métricas e logs após inferência ────────────────────────────
-        forecast_requests_total.labels(
+        record_forecast(
             ticker=ticker,
             plan=user_plan,
-            model_type="direct" if used_direct else "recursive"
-        ).inc()
-
-        # ── OTEL metrics push (Grafana Cloud) ─────────────────────────────────
-        from observability.metrics import get_meter
-        meter = get_meter()
-        if meter:
-            meter.create_gauge("predict_stock.mae", description="MAE").set(mae, {"ticker": ticker})
-            meter.create_gauge("predict_stock.r2", description="R2").set(r2, {"ticker": ticker})
-            meter.create_gauge("predict_stock.mape", description="MAPE").set(mape, {"ticker": ticker})
-            meter.create_counter("predict_stock.forecast_total", description="Forecasts").add(1, {
-                "ticker": ticker, "plan": user_plan,
-                "model_type": "direct" if used_direct else "recursive"
-            })
-
-
-        model_mae.labels(ticker=ticker).set(mae)
-        model_mape.labels(ticker=ticker).set(mape)
-        model_r2.labels(ticker=ticker).set(r2)
+            model_type="direct" if used_direct else "recursive",
+            duration=0  # já medido pelo context manager forecast_latency
+        )
+        record_model_quality(ticker=ticker, mae=mae, mape=mape, r2=r2)
 
         logger.info(
             "forecast_completed",
